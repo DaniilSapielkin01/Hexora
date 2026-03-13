@@ -5,13 +5,18 @@
   "description": "Web3 security SDK — monorepo",
   "type": "module",
   "scripts": {
-    "build": "pnpm -r build && pnpm size-limit",
     "test": "pnpm -r test",
     "lint": "pnpm -r lint",
     "dev": "pnpm -r dev",
-    "size": "size-limit"
+    "size": "size-limit",
+    "build": "pnpm -r build && pnpm size-limit",
+    "publish:all": "pnpm changeset version && pnpm -r publish --access public --no-git-checks",
+    "publish:core": "cd packages/core && pnpm publish --access public --no-git-checks",
+    "publish:address-guard": "cd packages/address-guard && pnpm publish --access public --no-git-checks",
+    "publish:hexora": "cd packages/hexora && pnpm publish --access public --no-git-checks"
   },
   "devDependencies": {
+    "@changesets/cli": "^2.30.0",
     "@size-limit/esbuild": "^12.0.1",
     "@size-limit/file": "^12.0.1",
     "@types/node": "^20.0.0",
@@ -43,5 +48,8 @@
       "import": "*",
       "limit": "20 KB"
     }
-  ]
+  ],
+  "publishConfig": {
+    "access": "public"
+  }
 }

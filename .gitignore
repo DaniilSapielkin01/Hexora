@@ -1,0 +1,48 @@
+# dependencies
+node_modules
+
+# build output
+dist
+*.tsbuildinfo
+*.d.ts.map
+
+# env — CRITICAL for open source, never expose keys
+.env
+.env.*
+.env.local
+.env.production
+
+# API keys / secrets
+*.pem
+*.key
+*.cert
+.secrets
+
+# misc
+.DS_Store
+Thumbs.db
+
+# logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+.pnpm-debug.log*
+
+# editors
+.vscode/*
+!.vscode/extensions.json
+.idea
+*.swp
+*.swo
+
+# OS
+.DS_Store
+.AppleDouble
+
+# test coverage
+coverage
+.nyc_output
+
+# temp
+tmp
+temp

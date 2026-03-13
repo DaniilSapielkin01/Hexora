@@ -1,0 +1,17 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "paths": {
+      "@hexora/core": ["./packages/core/src/index.ts"],
+      "@hexora/address-guard": ["./packages/address-guard/src/index.ts"],
+      "@hexora/domain-guard": ["./packages/domain-guard/src/index.ts"]
+    }
+  },
+  "include": [
+    "packages/core/src/**/*",
+    "packages/address-guard/src/**/*",
+    "packages/domain-guard/src/**/*",
+    "packages/hexora/src/**/*"
+  ]
+}

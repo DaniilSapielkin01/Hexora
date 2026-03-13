@@ -1,0 +1,47 @@
+{
+  "name": "hexora",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Web3 security SDK — monorepo",
+  "type": "module",
+  "scripts": {
+    "build": "pnpm -r build && pnpm size-limit",
+    "test": "pnpm -r test",
+    "lint": "pnpm -r lint",
+    "dev": "pnpm -r dev",
+    "size": "size-limit"
+  },
+  "devDependencies": {
+    "@size-limit/esbuild": "^12.0.1",
+    "@size-limit/file": "^12.0.1",
+    "@types/node": "^20.0.0",
+    "@typescript-eslint/eslint-plugin": "^7.0.0",
+    "@typescript-eslint/parser": "^7.0.0",
+    "eslint": "^9.0.0",
+    "eslint-import-resolver-typescript": "^3.6.0",
+    "eslint-plugin-import": "^2.29.0",
+    "size-limit": "^12.0.1",
+    "typescript": "^5.5.4",
+    "vitest": "^1.6.0"
+  },
+  "size-limit": [
+    {
+      "name": "core",
+      "path": "packages/core/dist/index.js",
+      "import": "*",
+      "limit": "10 KB"
+    },
+    {
+      "name": "address-guard",
+      "path": "packages/address-guard/dist/index.js",
+      "import": "*",
+      "limit": "10 KB"
+    },
+    {
+      "name": "hexora",
+      "path": "packages/hexora/dist/index.js",
+      "import": "*",
+      "limit": "20 KB"
+    }
+  ]
+}

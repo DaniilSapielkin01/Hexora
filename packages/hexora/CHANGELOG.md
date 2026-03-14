@@ -1,5 +1,14 @@
 # hexora
 
+## 1.0.2
+
+### Patch Changes
+
+- update version
+- Updated dependencies
+  - @hexora/address-guard@1.0.2
+  - @hexora/core@1.0.2
+
 ## 1.0.1
 
 ### Patch Changes

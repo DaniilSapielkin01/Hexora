@@ -2,7 +2,7 @@
   "name": "hexora",
   "version": "1.0.0",
   "license": "MIT",
-  "private": true,
+  "private": false,
   "description": "Web3 security SDK — monorepo",
   "type": "module",
   "scripts": {

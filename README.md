@@ -13,6 +13,8 @@
 
 Hexora is an open-source security SDK for wallets and dApps. It gives developers a simple API to protect users from the three most common Web3 attack vectors:
 
+📚 Hexora Documentation: https://hexora-docs.vercel.app/
+
 | Package | Protects against | Size |
 |---|---|---|
 | `@hexora/address-guard` | Address poisoning, dust attacks, zero-value transfers | 3.5 kB |

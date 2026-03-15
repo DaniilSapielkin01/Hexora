@@ -1,32 +1,25 @@
-# HEXORA
+# hexora
 
-**Web3 Security SDK** — detects address poisoning attacks before users lose funds.
+**Web3 Security SDK** — detect address poisoning attacks, phishing domains, and malicious transactions before users lose funds.
 
-[![npm](https://img.shields.io/npm/v/hexora)](https://www.npmjs.com/package/hexora)
-[![size](https://img.shields.io/bundlephobia/minzip/hexora)](https://bundlephobia.com/package/hexora)
-[![license](https://img.shields.io/npm/l/hexora)](./LICENSE)
-
----
-
-## The Problem
-
-Address poisoning attacks cost millions every year. An attacker creates a wallet with the same first and last characters as a legitimate address, sends a tiny transaction to the victim, and waits for them to copy the wrong address from their history.
-
-**MetaMask, Trust Wallet, Ledger Live** — none of them detect this. HEXORA fills that gap at the SDK level.
-
-```
-Legit:  0xEF70efAf74A3caAbF254E786F834133864BC80E6
-Fake:   0xe7d40975DD0396Fc81A39b0ED1f2b7aCE1BC80E6
-                  ^^^^^ different middle ^^^^^
-```
-
-These are real addresses from a live attack on BNB Chain. The victim `0x7265BD...075a91` had `0xEF70ef...BC80E6` in their history — the attacker deployed `0xe7d409...BC80E6` with matching first and last 4 chars and sent a [zero-value transfer](https://bscscan.com/tx/0x67e2b135f1255fa45db213d2da8231331c5b3c681031553b17e543bc7292acc8) to poison the history.
+[![npm version](https://img.shields.io/npm/v/hexora?color=6efaee&labelColor=060809)](https://www.npmjs.com/package/hexora)
+[![npm downloads](https://img.shields.io/npm/dm/hexora?color=6efaee&labelColor=060809)](https://www.npmjs.com/package/hexora)
+[![license](https://img.shields.io/npm/l/hexora?color=6efaee&labelColor=060809)](https://github.com/DaniilSapielkin01/Hexora/blob/main/LICENSE)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.5-blue?labelColor=060809)](https://www.typescriptlang.org/)
 
 ---
 
-### Real case
+## What is Hexora?
 
-https://x.com/incrypted/status/2029865814342398139
+Hexora is an open-source security SDK for wallets and dApps. It gives developers a simple API to protect users from the three most common Web3 attack vectors:
+
+| Package | Protects against | Size |
+|---|---|---|
+| `@hexora/address-guard` | Address poisoning, dust attacks, zero-value transfers | 3.5 kB |
+| `@hexora/domain-guard` | Phishing domains, typosquatting, homoglyph attacks | ~4 kB |
+| `@hexora/tx-guard` | Malicious approvals, permit drains, delegation abuse | ~6 kB |
+
+This package (`hexora`) is the **unified entry point** — it re-exports all three packages so you can install once and use everything.
 
 ---
 
@@ -34,462 +27,333 @@ https://x.com/incrypted/status/2029865814342398139
 
 ```bash
 npm install hexora
-# or
-pnpm add hexora
+# or individual packages
+npm install @hexora/address-guard
+npm install @hexora/domain-guard
+npm install @hexora/tx-guard
 ```
 
 ---
 
 ## Quick Start
 
-```ts
-import { checkAddress } from "hexora";
+Three lines of protection covering the full attack surface:
 
-const result = await checkAddress({
-  userAddress: "0x...", // connected wallet
-  inputAddress: "0x...", // address the user is about to send to
+```ts
+import { checkAddress, checkDomain, checkTx } from "hexora"
+
+// 1. When user pastes a recipient address
+const addrResult = await checkAddress({
+  userAddress:  connectedWallet,
+  inputAddress: pastedAddress,
+  provider:     window.ethereum,
+})
+if (addrResult.scam) blockTransaction(addrResult)
+
+// 2. On page load — check the current site
+const domainResult = await checkDomain({
+  domain: window.location.hostname,
+})
+if (domainResult.scam) showPhishingWarning(domainResult)
+
+// 3. Before showing "Sign" button
+const txResult = await checkTx({
+  tx:       pendingTransaction,
   provider: window.ethereum,
-});
-
-if (result.scam) {
-  console.warn(result.reason); // "batch_poisoning"
-  console.warn(result.riskLevel); // "critical"
-}
+})
+if (txResult.scam) blockSigning(txResult)
 ```
 
 ---
 
-## How It Works
+## @hexora/address-guard
 
-Every `checkAddress()` call runs through a multi-layer pipeline:
+Detects **address poisoning attacks** — a technique where attackers create wallet addresses with the same first and last characters as a legitimate address, then inject them into the victim's transaction history via zero-value transfers.
 
+**Real attack — BNB Chain:**
 ```
-1. Provider Detection    — auto-detects MetaMask / WalletConnect / Phantom / any EIP-1193
-2. Chain Resolution      — reads chainId from provider, no manual chain param needed
-3. History Fetch         — fetches last N transactions for both addresses in parallel
-4. Similarity Check      — weighted prefix/suffix/Levenshtein comparison
-5. Poison Detection      — zero-value transfers, batch poisoning, transferFrom spoofing, dust
-6. Input Addr Analysis   — checks if inputAddress itself is a known attacker wallet
-7. Risk Scoring          — combines all signals into a final structured result
+Legit: 0xEF70ef [Af74A3caAbF254E786F834133864] BC80E6
+Fake:  0xe7d409 [75DD0396Fc81A39b0ED1f2b7aCE1] BC80E6
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ different middle, same ends
 ```
 
----
+### Detection algorithms
 
-## Response
+- **Similarity scoring** — weighted prefix (40%) + suffix (40%) + Levenshtein distance (20%)
+- **Zero-value transfer detection** — identifies $0 ERC-20 transfers used to poison history
+- **Batch poisoning** — detects methodId `0xe19c2253` batch contracts (40 victims in one tx)
+- **TransferFrom spoofing** — catches contracts that move tokens without user interaction
+- **Dust attack detection** — micro-transactions below economic threshold
+- **New suspicious address** — flags addresses with no legitimate history
 
-```ts
-{
-  scam:            true,
-  reason:          "zero_value_transfer",
-  riskLevel:       "critical",
-  similarityScore: 87,
-  confidence:      96,
-  matchedAddress:  "0xEF70efAf74A3caAbF254E786F834133864BC80E6",
-  details: {
-    chain:          "bnb",
-    userAddress:    "0x7265BDC334276e496d284D2Dcc2918aA59075a91",
-    inputAddress:   "0xe7d40975DD0396Fc81A39b0ED1f2b7aCE1BC80E6",
-    historyScanned: 20,
-    poisonTxFound:  true,
-    zeroValueFound: true,
-    dustFound:      false,
-  },
-  error: null
-}
-```
-
-### `riskLevel` values
-
-| Value      | Meaning                                   |
-| ---------- | ----------------------------------------- |
-| `none`     | No signals detected — address looks clean |
-| `low`      | Weak signal — worth monitoring            |
-| `medium`   | Suspicious — consider warning the user    |
-| `high`     | Strong signal — warn the user             |
-| `critical` | Confirmed attack pattern — block the tx   |
-
-### `reason` values
-
-| Value                    | Description                                                  |
-| ------------------------ | ------------------------------------------------------------ |
-| `address_poisoning`      | Similar address found in user's transaction history          |
-| `zero_value_transfer`    | Incoming ERC-20 transfer with value = 0                      |
-| `batch_poisoning`        | Attacker contract poisoned history in a single batch tx      |
-| `transferfrom_spoofing`  | Contract forced a zero-value transferFrom using your address |
-| `dust_attack`            | Micro-transaction received from unknown address              |
-| `new_suspicious_address` | Young address with outgoing-only activity                    |
-
----
-
-## API Reference
-
-### `checkAddress(params)`
+### Usage
 
 ```ts
 import { checkAddress } from "hexora"
-
-const result = await checkAddress(params: CheckAddressParams): Promise<CheckResult>
-```
-
-#### `CheckAddressParams`
-
-| Field                 | Type              | Required | Default               | Description                            |
-| --------------------- | ----------------- | -------- | --------------------- | -------------------------------------- |
-| `userAddress`         | `string`          | ✅       | —                     | The connected wallet address           |
-| `inputAddress`        | `string`          | ✅       | —                     | The address the user wants to send to  |
-| `provider`            | `RawProvider`     | ✅       | —                     | EIP-1193 or Phantom provider           |
-| `historyLimit`        | `number`          | ❌       | `20`                  | Transactions to scan (max 50)          |
-| `similarityThreshold` | `number`          | ❌       | `85`                  | Minimum score to flag (0–100)          |
-| `dustThreshold`       | `bigint`          | ❌       | `10_000_000_000_000n` | Wei threshold for dust detection       |
-| `historyProvider`     | `HistoryProvider` | ❌       | —                     | Custom transaction history source      |
-| `apiKeys.etherscan`   | `string`          | ❌       | —                     | Etherscan API key (higher rate limits) |
-| `apiKeys.bscscan`     | `string`          | ❌       | —                     | BscScan API key                        |
-| `apiKeys.polygonscan` | `string`          | ❌       | —                     | Polygonscan API key                    |
-
----
-
-## Supported Chains
-
-| Chain     | Status | Auto-detected from provider |
-| --------- | ------ | --------------------------- |
-| Ethereum  | ✅     | `chainId: 0x1`              |
-| BNB Chain | ✅     | `chainId: 0x38`             |
-| Polygon   | ✅     | `chainId: 0x89`             |
-| Avalanche | ✅     | `chainId: 0xa86a`           |
-| Arbitrum  | ✅     | `chainId: 0xa4b1`           |
-| Optimism  | ✅     | `chainId: 0xa`              |
-| Solana    | 🔜     | Phantom provider            |
-| Bitcoin   | 🔜     | Coming soon                 |
-| Tron      | 🔜     | Coming soon                 |
-
-Chain is resolved **automatically** from the provider — you never pass `chain` manually.
-
----
-
-## Supported Wallets & Providers
-
-HEXORA auto-detects the provider type. Any wallet that implements **EIP-1193** works out of the box:
-
-| Wallet              | Works |
-| ------------------- | ----- |
-| MetaMask            | ✅    |
-| WalletConnect       | ✅    |
-| Coinbase Wallet     | ✅    |
-| Trust Wallet (EVM)  | ✅    |
-| Rainbow             | ✅    |
-| Rabby               | ✅    |
-| Ledger Live         | ✅    |
-| Phantom (Solana)    | ✅    |
-| Any EIP-1193 wallet | ✅    |
-
----
-
-## Usage Examples
-
-### React
-
-```tsx
-import { checkAddress } from "hexora";
-
-const handleSend = async () => {
-  const result = await checkAddress({
-    userAddress: account,
-    inputAddress: pastedAddress,
-    provider: window.ethereum,
-  });
-
-  if (result.scam) {
-    alert(`⚠️ ${result.reason} — risk: ${result.riskLevel}`);
-    return;
-  }
-
-  // proceed with transaction
-};
-```
-
-### Next.js
-
-Works in client components only — `window.ethereum` is not available server-side.
-
-```tsx
-"use client";
-import { checkAddress } from "hexora";
-
-export function SendForm() {
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const result = await checkAddress({
-      userAddress: userWallet,
-      inputAddress: recipientInput,
-      provider: window.ethereum,
-    });
-    if (result.scam) setWarning(result.reason);
-  };
-}
-```
-
-### Vue 3
-
-```ts
-import { checkAddress } from "hexora";
-
-async function onSend() {
-  const result = await checkAddress({
-    userAddress: wallet.address,
-    inputAddress: form.recipient,
-    provider: window.ethereum,
-  });
-
-  if (result.scam) {
-    warningMessage.value = result.reason;
-    return;
-  }
-}
-```
-
-### Svelte
-
-```ts
-import { checkAddress } from "hexora";
-
-async function handleSend() {
-  const result = await checkAddress({
-    userAddress: $wallet.address,
-    inputAddress: recipientInput,
-    provider: window.ethereum,
-  });
-
-  if (result.scam) {
-    warning = result.reason;
-  }
-}
-```
-
-### Angular
-
-```ts
-import { Injectable } from "@angular/core";
-import { checkAddress } from "hexora";
-
-@Injectable({ providedIn: "root" })
-export class HexoraService {
-  async check(userAddress: string, inputAddress: string) {
-    return checkAddress({
-      userAddress,
-      inputAddress,
-      provider: (window as any).ethereum,
-    });
-  }
-}
-```
-
-### React Native
-
-> Requires a WalletConnect or custom EIP-1193 compatible provider — `window.ethereum` is not available in React Native.
-
-```tsx
-import { checkAddress } from "hexora";
-import { useWalletConnectModal } from "@walletconnect/modal-react-native";
-
-export function SendScreen() {
-  const { provider } = useWalletConnectModal();
-
-  const handleSend = async () => {
-    const result = await checkAddress({
-      userAddress: connectedAddress,
-      inputAddress: recipientAddress,
-      provider: provider, // WalletConnect EIP-1193 provider
-    });
-
-    if (result.scam) {
-      Alert.alert("⚠️ Warning", `Suspicious address: ${result.reason}`);
-      return;
-    }
-  };
-}
-```
-
-### Node.js / Backend
-
-Useful for pre-validating addresses in a backend before broadcasting transactions.
-
-```ts
-import { checkAddress } from "hexora";
-import type { EIP1193Provider } from "hexora";
-
-// Node.js has no window.ethereum — use your own RPC provider adapter
-class NodeProvider implements EIP1193Provider {
-  async request({ method }: { method: string }): Promise<unknown> {
-    if (method === "eth_chainId") return "0x1";
-    throw new Error(`Unsupported method: ${method}`);
-  }
-}
+// or: import { checkAddress } from "@hexora/address-guard"
 
 const result = await checkAddress({
-  userAddress: "0x7265BDC334276e496d284D2Dcc2918aA59075a91",
-  inputAddress: "0xe7d40975DD0396Fc81A39b0ED1f2b7aCE1BC80E6",
-  provider: new NodeProvider(),
-  apiKeys: { etherscan: process.env.ETHERSCAN_API_KEY },
-});
+  userAddress:  "0xYourWallet",
+  inputAddress: "0xAddressToVerify",
+  provider:     window.ethereum,
+})
+
+console.log(result.scam)           // true
+console.log(result.reason)         // "zero_value_transfer"
+console.log(result.riskLevel)      // "critical"
+console.log(result.confidence)     // 96
+console.log(result.similarityScore) // 87
+console.log(result.matchedAddress) // "0xLegitAddress..."
 ```
 
-### Browser Extension (Chrome / Firefox)
+### Parameters
+
+| Param | Type | Required | Description |
+|---|---|---|---|
+| `userAddress` | `string` | ✓ | Connected wallet address |
+| `inputAddress` | `string` | ✓ | Address to verify |
+| `provider` | `EIP1193Provider` | ✓ | MetaMask, WalletConnect, or any EIP-1193 provider |
+| `historyLimit` | `number` | — | Transactions to scan (default: 20, max: 50) |
+| `similarityThreshold` | `number` | — | Min score to flag (default: 85, range: 0–100) |
+| `apiKeys.etherscan` | `string` | — | Etherscan API key for higher rate limits |
+| `apiKeys.bscscan` | `string` | — | BscScan API key |
+
+### Result shape
 
 ```ts
-import { checkAddress } from "hexora";
-
-chrome.runtime.onMessage.addListener(async (msg, _sender, sendResponse) => {
-  if (msg.type === "CHECK_ADDRESS") {
-    const result = await checkAddress({
-      userAddress: msg.userAddress,
-      inputAddress: msg.inputAddress,
-      provider: window.ethereum,
-    });
-    sendResponse(result);
+interface CheckResult {
+  scam:            boolean
+  reason:          ScamReason | null   // "address_poisoning" | "zero_value_transfer" | ...
+  riskLevel:       RiskLevel           // "none" | "low" | "medium" | "high" | "critical"
+  confidence:      number              // 0–100
+  similarityScore: number              // 0–100
+  matchedAddress:  string | null       // closest legit address found
+  details: {
+    historyScanned: number
+    chain:          string
   }
-  return true; // keep channel open for async response
-});
+  error: CheckError | null
+}
 ```
 
-### With API Keys (higher rate limits)
+### Supported chains
+
+| Chain | Status |
+|---|---|
+| Ethereum | ✅ Live |
+| BNB Chain | ✅ Live |
+| Polygon | ✅ Live |
+| Avalanche | ✅ Live |
+| Arbitrum | ✅ Live |
+| Optimism | ✅ Live |
+| Solana | 🔜 Soon |
+
+---
+
+## @hexora/domain-guard
+
+Detects **phishing domains** targeting Web3 users — typosquatting, homoglyph attacks, subdomain hijacking, NFT spam domains, and newly registered suspicious sites.
+
+### Detection layers (9 total)
+
+1. **Blacklist** — 35+ confirmed phishing domains (exact match, instant)
+2. **Whitelist** — 120+ legitimate Web3 domains (safe bypass)
+3. **Homoglyph** — Cyrillic/Greek/Unicode lookalike chars (`uniswаp.org` uses Cyrillic 'а')
+4. **Leet substitution** — numeric replacements (`un1swap.org`, `0pensea.io`)
+5. **IDN / Punycode** — internationalized domain name encoding attacks
+6. **Subdomain hijack** — `app.uniswap.evil.com` pattern detection
+7. **Typosquatting** — Levenshtein distance against 120+ legit domains (threshold: 82%)
+8. **NFT spam heuristics** — crypto bait keywords + suspicious TLD combos (`SHIBAR.la`, `NFTWOOD.top`)
+9. **Domain age (RDAP)** — optional online check; domains < 30 days old flagged as suspicious
+
+### Usage
 
 ```ts
-const result = await checkAddress({
-  userAddress: account,
-  inputAddress: pastedAddress,
-  provider: window.ethereum,
-  apiKeys: {
-    etherscan: "YOUR_ETHERSCAN_KEY",
-    bscscan: "YOUR_BSCSCAN_KEY",
+import { checkDomain } from "hexora"
+// or: import { checkDomain } from "@hexora/domain-guard"
+
+// Basic — offline, instant
+const result = await checkDomain({
+  domain: "uniswap.com",
+})
+
+// With domain age check (requires network)
+const result = await checkDomain({
+  domain:   "app.uniswap.org",
+  checkAge: true,
+})
+
+// Custom lists
+const result = await checkDomain({
+  domain:          "myprotocol.io",
+  customWhitelist: ["myprotocol.io"],
+  customBlacklist: ["evil-clone.io"],
+})
+
+console.log(result.scam)        // true
+console.log(result.reason)      // "blacklisted_domain"
+console.log(result.riskLevel)   // "critical"
+console.log(result.matchedLegit) // "uniswap.org"
+console.log(result.confidence)  // 100
+```
+
+### Parameters
+
+| Param | Type | Required | Description |
+|---|---|---|---|
+| `domain` | `string` | ✓ | URL or bare domain to check |
+| `typosquatThreshold` | `number` | — | Min similarity to flag (default: 82) |
+| `customWhitelist` | `string[]` | — | Additional safe domains |
+| `customBlacklist` | `string[]` | — | Additional blocked domains |
+| `checkAge` | `boolean` | — | Enable RDAP domain age check (default: false) |
+
+### Coverage metrics
+
+- **9** detection layers
+- **120+** whitelisted legitimate Web3 domains
+- **35+** blacklisted confirmed phishing domains
+- **8,000+** typosquat variants covered
+- **0** required API keys
+
+---
+
+## @hexora/tx-guard
+
+Detects **malicious transactions and signatures** before the user signs. Analyzes calldata structure, EIP-712 typed data, contract age, proxy upgrades, and more. No blacklist, no ML — pure pattern-based detection that works offline.
+
+In 2024, wallet drainers stole **$494 million** from 332,000 victims. Angel Drainer, Inferno Drainer, and Pink Drainer together account for 93.9% of stolen funds — tx-guard detects the patterns all three rely on.
+
+### Detection patterns (13 total)
+
+| Pattern | Risk | Description |
+|---|---|---|
+| Unlimited Approval | 🔴 Critical | `approve(spender, 2^256-1)` to unknown address — grants permanent full token access |
+| Delegation Abuse | 🔴 Critical | `updateDelegate` / `approveDelegation` — Venus $27M exploit exact pattern |
+| EIP-2612 Permit | 🔴 Critical | Offline gasless signature granting token allowance — #1 drainer vector |
+| setApprovalForAll | 🔴 Critical | One signature = all NFTs in collection transferred |
+| Permit2 Drain | 🔴 Critical | Blanket multi-token approval via Uniswap Permit2 to unknown spender |
+| Ice Phishing | 🟠 High | `transferFrom(victim→attacker)` using forgotten old allowance |
+| Proxy Recently Upgraded | 🟠 High | EIP-1967 implementation changed < 7 days ago |
+| Suspicious Multicall | 🟠 High | `approve + transferFrom` bundled in one atomic multicall |
+| Seaport Order Spoof | 🟠 High | Fake OpenSea order routes assets to attacker (Inferno pattern) |
+| Fake Token Airdrop | 🟠 High | Token name contains URL or scam call-to-action |
+| New Contract + ETH | 🟠 High | Contract < 30 days old requesting ETH value |
+| ERC-4337 Suspicious | 🟡 Medium | `handleOps` on non-EntryPoint contract |
+| Composite Scoring | 🟠 High | Multiple weak signals combined into one verdict |
+
+### The Venus Protocol exploit
+
+In 2025, an attacker used a fake Zoom interface to trick a Venus Protocol user into signing one transaction: `updateDelegate(attacker_address, true)`. This granted the attacker full borrowing rights on the victim's position. $27 million was drained.
+
+tx-guard detects this exact pattern:
+
+```ts
+const result = await checkTx({
+  tx: {
+    to:   "0xfd36e2c2a6789db23113685031d7f16329158384", // Venus Comptroller
+    from: "0xVictimAddress",
+    data: "0xe8eda9df000000000000000000000000attacker...0001",
   },
-});
+})
+
+// result.scam      → true
+// result.reason    → "ice_phishing"
+// result.riskLevel → "critical"
+// result.warning   → "DELEGATION ATTACK DETECTED. This transaction grants..."
 ```
 
-### Custom History Provider
-
-Implement `HistoryProvider` to plug in your own data source (Alchemy, Moralis, your own indexer):
+### Usage
 
 ```ts
-import { checkAddress } from "hexora";
-import type { HistoryProvider, NormalizedTransaction, ChainId } from "hexora";
+import { checkTx } from "hexora"
+// or: import { checkTx } from "@hexora/tx-guard"
 
-class AlchemyProvider implements HistoryProvider {
-  async getTransactions(
-    address: string,
-    chain: ChainId,
-    limit: number
-  ): Promise<NormalizedTransaction[]> {
-    // fetch from Alchemy / Moralis / your indexer
-    return [];
-  }
-}
-
-const result = await checkAddress({
-  userAddress: account,
-  inputAddress: pastedAddress,
+// Basic
+const result = await checkTx({
+  tx:       pendingTransaction,
   provider: window.ethereum,
-  historyProvider: new AlchemyProvider(),
-});
-```
+})
 
----
+// With EIP-712 typed data (permit, Seaport orders)
+const result = await checkTx({
+  tx,
+  typedData: eip712Payload,
+  provider:  window.ethereum,
+})
 
-## Platform Support
+// With deep simulation (requires Alchemy/Infura key)
+const result = await checkTx({
+  tx,
+  provider: window.ethereum,
+  rpcUrl:   "https://eth-mainnet.g.alchemy.com/v2/YOUR_KEY",
+})
 
-| Platform           | Status | Notes                                     |
-| ------------------ | ------ | ----------------------------------------- |
-| React              | ✅     | Full support                              |
-| Next.js            | ✅     | Client components only                    |
-| Vue 3              | ✅     | Full support                              |
-| Svelte / SvelteKit | ✅     | Full support                              |
-| Angular            | ✅     | Full support                              |
-| React Native       | ✅     | Requires WalletConnect or custom provider |
-| Node.js            | ✅     | Custom EIP-1193 adapter required          |
-| Browser Extension  | ✅     | Chrome, Firefox, Edge                     |
-| Vanilla JS         | ✅     | Full support                              |
+// Fake token airdrop detection
+const result = await checkTx({
+  tx,
+  tokenName:   incomingToken.name,
+  tokenSymbol: incomingToken.symbol,
+})
 
----
-
-## Coming Soon
-
-Native SDK support is planned for mobile platforms — no JS bridge required:
-
-| Platform         | Status | Notes                                  |
-| ---------------- | ------ | -------------------------------------- |
-| Swift / iOS      | 🔜     | Native Swift SDK                       |
-| Kotlin / Android | 🔜     | Native Kotlin SDK                      |
-| Flutter          | 🔜     | Dart package                           |
-| Rust             | 🔜     | For CLI tools and backend integrations |
-| Python           | 🔜     | For backend / analytics use cases      |
-
-> Want to contribute a native SDK? Open an issue or reach out.
-
----
-
-## Error Handling
-
-HEXORA never throws. All errors are returned in `result.error`:
-
-```ts
-const result = await checkAddress({ ... })
-
-if (result.error) {
-  console.error(result.error.code)    // "network_unavailable"
-  console.error(result.error.message) // human-readable message
+if (result.scam) {
+  alert(result.warning)  // human-readable explanation
+  // result.reason    → "unlimited_approval"
+  // result.riskLevel → "critical"
+  // result.confidence → 92
 }
 ```
 
-### Error codes
+### Parameters
 
-| Code                   | Description                         |
-| ---------------------- | ----------------------------------- |
-| `invalid_address`      | Address format is invalid for chain |
-| `unknown_provider`     | Provider type could not be detected |
-| `unsupported_chain`    | Chain is not supported yet          |
-| `network_unavailable`  | Could not connect to provider       |
-| `history_fetch_failed` | Transaction history fetch failed    |
-| `rate_limited`         | API rate limit hit                  |
-| `unknown`              | Unexpected error                    |
-
----
-
-## Packages
-
-This is a monorepo. You can install the full SDK or individual packages:
-
-| Package                 | Description                  | Size        |
-| ----------------------- | ---------------------------- | ----------- |
-| `hexora`                | Full SDK — all modules       | ~3.5 kB     |
-| `@hexora/address-guard` | Address poisoning detection  | ~3.5 kB     |
-| `@hexora/core`          | Shared utilities and types   | ~2.2 kB     |
-| `@hexora/domain-guard`  | Domain phishing detection 🔜 | coming soon |
+| Param | Type | Required | Description |
+|---|---|---|---|
+| `tx` | `RawTransaction` | ✓ | Transaction object `{ to, from, data?, value?, chainId? }` |
+| `provider` | `EIP1193Provider` | — | Wallet provider — enables contract age + simulation |
+| `typedData` | `TypedDataPayload` | — | EIP-712 signature payload to analyze |
+| `tokenName` | `string` | — | Token name for fake airdrop detection |
+| `tokenSymbol` | `string` | — | Token symbol for fake airdrop detection |
+| `rpcUrl` | `string` | — | Premium RPC for `debug_traceCall` simulation (Alchemy/Infura) |
 
 ---
 
-## Architecture
+## Framework support
 
-```
-hexora/
-├── packages/
-│   ├── core/           — shared: types, provider detection, similarity, cache
-│   ├── address-guard/  — address poisoning detection logic
-│   ├── domain-guard/   — domain phishing detection (coming soon)
-│   └── hexora/         — single entry point re-exporting all modules
-```
+Works in any JavaScript environment — no assumptions about your stack.
 
-Each package is independent. `@hexora/core` is shared — never duplicate logic across modules.
-
----
-
-## Privacy
-
-- All analysis runs **locally** — no data is sent to HEXORA servers
-- Transaction history is fetched directly from public block explorer APIs
-- In-memory cache only (5 min TTL) — cleared when the page unloads
-- No `localStorage`, no cookies, no tracking
+| Environment | Support |
+|---|---|
+| React | ✅ |
+| Next.js | ✅ (client components) |
+| Vue 3 | ✅ |
+| Svelte | ✅ |
+| Angular | ✅ |
+| React Native | ✅ (with WalletConnect provider) |
+| Node.js | ✅ (custom EIP-1193 adapter) |
+| Browser Extension | ✅ (Chrome, Firefox, Edge) |
+| Vanilla JS | ✅ |
 
 ---
 
-## License
+## Philosophy
 
-MIT — free for personal and commercial use.
+**SDK-first. Zero UI. Zero opinions.**
+
+Hexora is infrastructure, not a product. Every function returns a structured result object — you decide what to show the user, whether to block the transaction, and how to present the warning. We own the security logic. You own the UX.
+
+**Privacy first.** All detection runs locally by default. No transaction data, addresses, or domains are sent to external servers. The only optional network calls are domain age checks (RDAP) and deep transaction simulation (your own Alchemy/Infura key).
+
+**Open source.** MIT license. Auditable, forkable, composable.
+
+---
+
+## Links
+
+- [GitHub](https://github.com/DaniilSapielkin01/Hexora)
+- [npm — hexora](https://www.npmjs.com/package/hexora)
+- [npm — @hexora/address-guard](https://www.npmjs.com/package/@hexora/address-guard)
+- [npm — @hexora/domain-guard](https://www.npmjs.com/package/@hexora/domain-guard)
+- [npm — @hexora/tx-guard](https://www.npmjs.com/package/@hexora/tx-guard)
+
+---
+
+MIT License · © Hexora Contributors

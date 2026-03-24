@@ -64,6 +64,19 @@ importers:
         specifier: ^5.5.4
         version: 5.9.3
 
+  packages/domain-guard:
+    dependencies:
+      '@hexora/core':
+        specifier: workspace:*
+        version: link:../core
+    devDependencies:
+      typescript:
+        specifier: ^5.5.4
+        version: 5.9.3
+      vitest:
+        specifier: ^1.6.0
+        version: 1.6.1(@types/node@20.19.37)
+
   packages/hexora:
     dependencies:
       '@hexora/address-guard':
@@ -76,6 +89,19 @@ importers:
       typescript:
         specifier: ^5.5.4
         version: 5.9.3
+
+  packages/tx-guard:
+    dependencies:
+      '@hexora/core':
+        specifier: workspace:*
+        version: link:../core
+    devDependencies:
+      typescript:
+        specifier: ^5.5.4
+        version: 5.9.3
+      vitest:
+        specifier: ^1.6.0
+        version: 1.6.1(@types/node@20.19.37)
 
 packages:
 

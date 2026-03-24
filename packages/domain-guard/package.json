@@ -1,5 +1,5 @@
 {
-  "name": "@hexora/address-guard",
+  "name": "@hexora/domain-guard",
   "version": "1.0.4",
   "license": "MIT",
   "type": "module",
@@ -13,13 +13,16 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "README.md",
+    "LICENSE"
   ],
   "scripts": {
     "build": "tsc",
     "test": "vitest run",
     "lint": "eslint src",
-    "dev": "tsc --watch"
+    "dev": "tsc --watch",
+    "update:blacklist": "tsx scripts/update-blacklist.ts"
   },
   "dependencies": {
     "@hexora/core": "workspace:*"

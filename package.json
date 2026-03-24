@@ -1,6 +1,6 @@
 {
   "name": "hexora-monorepo",
-  "version": "1.0.2",
+  "version": "1.0.4",
   "license": "MIT",
   "private": true,
   "description": "Web3 security SDK — monorepo",
@@ -11,10 +11,8 @@
     "dev": "pnpm -r dev",
     "size": "size-limit",
     "build": "pnpm -r build && pnpm size-limit",
-    "publish:all": "pnpm changeset version && pnpm -r publish --access public --no-git-checks",
-    "publish:core": "cd packages/core && pnpm publish --access public --no-git-checks",
-    "publish:address-guard": "cd packages/address-guard && pnpm publish --access public --no-git-checks",
-    "publish:hexora": "cd packages/hexora && pnpm publish --access public --no-git-checks"
+    "publish": "pnpm -r publish --access public --no-git-checks",
+    "release": "pnpm changeset && pnpm changeset version && pnpm publish"
   },
   "devDependencies": {
     "@changesets/cli": "^2.30.0",
@@ -42,6 +40,18 @@
       "path": "packages/address-guard/dist/index.js",
       "import": "*",
       "limit": "10 KB"
+    },
+    {
+      "name": "domain-guard",
+      "path": "packages/domain-guard/dist/index.js",
+      "import": "*",
+      "limit": "10 KB"
+    },
+    {
+      "name": "tx-guard",
+      "path": "packages/tx-guard/dist/index.js",
+      "import": "*",
+      "limit": "15 KB"
     },
     {
       "name": "hexora",

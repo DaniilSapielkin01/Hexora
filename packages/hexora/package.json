@@ -1,6 +1,6 @@
 {
   "name": "hexora",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "license": "MIT",
   "type": "module",
   "main": "./dist/index.js",
@@ -24,7 +24,9 @@
   },
   "dependencies": {
     "@hexora/core": "workspace:*",
-    "@hexora/address-guard": "workspace:*"
+    "@hexora/address-guard": "workspace:*",
+    "@hexora/tx-guard": "workspace:*",
+    "@hexora/domain-guard": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^5.5.4"

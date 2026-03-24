@@ -85,6 +85,12 @@ importers:
       '@hexora/core':
         specifier: workspace:*
         version: link:../core
+      '@hexora/domain-guard':
+        specifier: workspace:*
+        version: link:../domain-guard
+      '@hexora/tx-guard':
+        specifier: workspace:*
+        version: link:../tx-guard
     devDependencies:
       typescript:
         specifier: ^5.5.4

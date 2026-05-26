@@ -17,9 +17,9 @@ Hexora is an open-source security SDK for wallets and dApps. It gives developers
 
 | Package | Protects against | Size |
 |---|---|---|
-| `@hexora/address-guard` | Address poisoning, dust attacks, zero-value transfers | 3.5 kB |
-| `@hexora/domain-guard` | Phishing domains, typosquatting, homoglyph attacks | ~4 kB |
-| `@hexora/tx-guard` | Malicious approvals, permit drains, delegation abuse | ~6 kB |
+| `@hexora/address-guard` | Address poisoning, native + ERC-20 dust attacks, zero-value transfers | ~3.8 kB |
+| `@hexora/domain-guard` | Phishing domains, SLD-weighted typosquat, homoglyph, IDN, subdomain hijack | ~4.5 kB |
+| `@hexora/tx-guard` | Malicious approvals, permit drains, delegation abuse, ERC-4337 v0.6/v0.7 | ~14.6 kB |
 
 This package (`hexora`) is the **unified entry point** — it re-exports all three packages so you can install once and use everything.
 

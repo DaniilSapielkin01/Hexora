@@ -100,7 +100,8 @@ const result = await checkDomain({
 {
   scam:        boolean
   reason:      "blacklisted_domain" | "typosquat" | "homoglyph" | "subdomain_hijack" |
-               "idn_suspicious" | "nft_spam_domain" | "suspicious_domain" | "new_domain" | null
+               "idn_suspicious" | "nft_spam_domain" | "suspicious_domain" |
+               "suspicious_tld_combo" | "new_domain" | null
   riskLevel:   "none" | "low" | "medium" | "high" | "critical"
   confidence:  number   // 0–100
   matchedLegit: string | null  // closest legitimate domain found
@@ -131,7 +132,7 @@ All 9 layers run on every check. No external API calls required by default.
 | 4 | **Leet substitution** | Catches `0`, `1`, `3` replacing `o`, `l`, `e` |
 | 5 | **IDN / Punycode** | Detects encoded international domain attacks |
 | 6 | **Subdomain hijack** | Parses domain hierarchy to find real registered domain |
-| 7 | **Typosquatting** | Levenshtein distance against 120+ legit domains |
+| 7 | **Typosquatting** | SLD-weighted similarity (0.9 SLD + 0.1 TLD) against 120+ legit domains — catches `uniswap.com` vs `uniswap.org` that a flat Levenshtein misses |
 | 8 | **NFT spam heuristics** | Crypto bait keywords + suspicious TLD combos |
 | 9 | **Domain age (RDAP)** | Optional — flags domains < 30 days old |
 

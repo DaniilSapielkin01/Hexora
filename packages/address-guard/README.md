@@ -23,6 +23,8 @@ Fake:  0xe7d409 [75DD0396Fc81A39b0ED1f2b7aCE1] BC80E6
 
 Most wallets display these addresses identically in truncated form. Users can't tell the difference by eye.
 
+Hexora detects both **native (ETH)** and **ERC-20 token** dust patterns — attackers almost always use cheap token transfers because native dust is unprofitable on gas.
+
 ---
 
 ## Install
@@ -133,11 +135,15 @@ Every `checkAddress()` call runs through a 7-layer pipeline:
 ```
 1. Provider detection   — auto-detects MetaMask, WalletConnect, Phantom
 2. Chain resolution     — reads chainId from provider automatically
-3. History fetch        — fetches last N txs from block explorer APIs
-4. Similarity check     — weighted prefix (40%) + suffix (40%) + Levenshtein (20%)
-5. Poison detection     — zero-value, batch, transferFrom, dust patterns
+3. History fetch        — last N txs from block explorers, Promise.allSettled
+                          so a single failed lookup doesn't lose the rest
+4. Similarity check     — weighted prefix (40%) + suffix (40%) + Levenshtein (20%);
+                          contract addresses (DEX routers, tokens) filtered out
+                          to avoid false positives
+5. Poison detection     — zero-value, batch, transferFrom, native + ERC-20 dust
 6. Input analysis       — checks if the address itself is a known attacker wallet
-7. Risk scoring         — combines all signals into a structured result
+7. Risk scoring         — combines all signals; multi-signal amplifier boosts
+                          confidence when several weak signals fire together
 ```
 
 ---

@@ -110,7 +110,7 @@ const result = await checkTx({
 
 ### Medium
 
-**ERC-4337 AA Suspicious** — In Account Abstraction, user operations flow Bundler → EntryPoint → your wallet. If `handleOps` is called on an address that isn't the official ERC-4337 EntryPoint, someone is routing your transaction through custom logic to conceal the real operation.
+**ERC-4337 AA Suspicious** — In Account Abstraction, user operations flow Bundler → EntryPoint → your wallet. If `handleOps` is called on an address that isn't the official ERC-4337 EntryPoint, someone is routing your transaction through custom logic to conceal the real operation. Both v0.6 (selector `0x1fad948c`) and v0.7 (`0x765e827f`, packed format) EntryPoints are decoded via viem.
 
 **Composite Scoring** — Multiple weak signals that wouldn't trigger a flag individually are combined into a single risk verdict. A new contract + multicall + medium-confidence detection together cross the threshold.
 
@@ -181,8 +181,24 @@ type TxScamReason =
 - **13** attack patterns
 - **$494M** stolen in 2024 — the attacks we detect
 - **93.9%** of top drainer families covered (Angel, Inferno, Pink)
-- **0** external API calls required
+- **0** external API calls required for detection
 - All EVM chains supported
+
+## Dependencies
+
+Uses [`viem`](https://viem.sh) for ABI decoding (keccak256, `decodeFunctionData`, `decodeAbiParameters`). If you already have viem in your dApp this is free via dedup; otherwise viem is tree-shaken to ~6 kB inside this package.
+
+## Additional exports
+
+```ts
+import { isHandleOpsCalldata, extractUserOps, analyzeUserOperation } from "@hexora/tx-guard"
+
+// Quick check before deeper analysis
+if (isHandleOpsCalldata(tx.data)) {
+  const ops = extractUserOps(tx.data)  // v0.6 + v0.7 supported
+  for (const op of ops) analyzeUserOperation(op)
+}
+```
 
 ---
 

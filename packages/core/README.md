@@ -16,7 +16,8 @@ Shared types, provider detection, and utilities for the Hexora Web3 Security SDK
 - **Provider detection** — auto-detects MetaMask, WalletConnect, Phantom, and any EIP-1193 provider
 - **Similarity algorithms** — Levenshtein distance and weighted prefix/suffix scoring
 - **Transaction history fetching** — adapters for Etherscan, BscScan, Polygonscan, and more
-- **In-memory caching** — deduplicates API calls across multiple checks
+- **Bounded LRU cache** — deduplicates API calls across multiple checks (max 1000 entries, 5 min TTL)
+- **Opt-in logger** — `setLogger()` for observability into swallowed errors (rate limits, network failures, unverified contracts)
 
 You rarely need to install this directly — it is a peer dependency of `@hexora/address-guard`, `@hexora/domain-guard`, and `@hexora/tx-guard` and gets installed automatically.
 
@@ -146,9 +147,49 @@ type RawProvider = EIP1193Provider | PhantomProvider | Record<string, unknown>
 
 ---
 
+## Logger
+
+Hexora silently catches recoverable errors (rate limits, unverified contracts, network blips) so a single bad RPC call doesn't break your app. To see what's happening, inject a logger:
+
+```ts
+import { setLogger } from "@hexora/core"
+
+setLogger({
+  log: (event) => {
+    // event: { level, source, message, context? }
+    console[event.level === "error" ? "error" : "warn"](
+      `[hexora:${event.source}] ${event.message}`,
+      event.context
+    )
+  }
+})
+
+// Pass null to reset to no-op:
+setLogger(null)
+```
+
+Sources currently emitted: `historyFetcher`, `abiDecoder`, `checkAddress`. Levels: `debug` | `info` | `warn` | `error`.
+
+---
+
+## Exported constants
+
+Re-tunable timeouts (e.g. if you need shorter HTTP timeouts in a high-latency environment):
+
+```ts
+import {
+  HTTP_TIMEOUT_MS,         // 3000  — short HTTP calls (ABI lookup)
+  HISTORY_FETCH_TIMEOUT_MS,// 8000  — history pagination
+  HTTP_RETRIES,            // 2
+  HTTP_RETRY_DELAY_MS,     // 1000
+} from "@hexora/core"
+```
+
+---
+
 ## Bundle size
 
-2.2 kB minified + brotlied. Zero external dependencies.
+~2.6 kB minified + brotlied. Zero external dependencies.
 
 ---
 

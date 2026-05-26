@@ -1,5 +1,19 @@
 # hexora
 
+## 2.0.0
+
+### Major Changes
+
+- Major reliability and accuracy pass across detectors.
+
+### Patch Changes
+
+- Updated dependencies
+  - @hexora/address-guard@2.0.0
+  - @hexora/core@2.0.0
+  - @hexora/domain-guard@2.0.0
+  - @hexora/tx-guard@2.0.0
+
 ## 1.0.4
 
 ### Patch Changes

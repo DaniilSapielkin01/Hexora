@@ -8,6 +8,7 @@ export type DomainScamReason =
   | "idn_suspicious"
   | "nft_spam_domain"
   | "suspicious_domain"
+  | "suspicious_tld_combo"  // suspicious TLD + medium-risk keyword
   | "new_domain"          // domain registered < 30 days ago + other signals
 
 export interface CheckDomainParams {

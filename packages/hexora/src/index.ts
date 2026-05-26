@@ -17,4 +17,10 @@ export type {
   EIP1193Provider,
   PhantomProvider,
   RawProvider,
+  Logger,
+  LogEvent,
+  LogLevel,
 } from "@hexora/core";
+
+// Opt-in observability — see @hexora/core/logger
+export { setLogger } from "@hexora/core";

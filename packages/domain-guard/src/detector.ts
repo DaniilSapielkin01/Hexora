@@ -1,3 +1,4 @@
+import { domainToUnicode } from "node:url"
 import { KNOWN_LEGIT_DOMAINS, KNOWN_PHISHING_DOMAINS } from "./knownDomains.js"
 import {
   normalizeDomain, getRegisteredDomain, getSubdomainDepth,
@@ -91,9 +92,13 @@ export function detectDomain(
   }
 
   // ── 5. IDN / Punycode ─────────────────────────────────────────────────────
+  // Decode punycode (xn--…) to the actual unicode form, then strip homoglyphs
+  // so we can compare against latin whitelist domains.
   if (idn) {
-    const decoded = normalizeHomoglyphs(domain)
-    const match   = findMostSimilarLegit(decoded, whitelist, 70)
+    let decoded = domain
+    try { decoded = domainToUnicode(domain) || domain } catch { /* keep raw */ }
+    decoded = normalizeHomoglyphs(decoded)
+    const match = findMostSimilarLegit(getRegisteredDomain(decoded), whitelist, 70)
     if (match) {
       return { detected: true, reason: "idn_suspicious", confidence: 90,
         matchedLegit: match.domain, similarityScore: match.score, details }
@@ -101,12 +106,31 @@ export function detectDomain(
   }
 
   // ── 6. Subdomain hijack ───────────────────────────────────────────────────
-  if (subdomainDepth >= 2) {
+  // Two patterns we catch:
+  //   a) "opensea.io.phishing.com"     — full legit registered domain appears
+  //      as a subdomain, but the actual registered domain is the attacker's.
+  //   b) "app.uniswap.evil.com"        — only the legit SLD ("uniswap") is
+  //      embedded as a label to fool users glancing at the URL bar.
+  if (subdomainDepth >= 1) {
+    const domainParts     = domain.split(".")
+    // Labels that belong to the subdomain (everything except the last two).
+    const subdomainLabels = domainParts.slice(0, -2)
+
     for (const legit of whitelist) {
       const legitBase = getRegisteredDomain(legit)
-      if (domain.includes(legitBase) && registeredDomain !== legitBase) {
+      if (legitBase === registeredDomain) continue   // legit's own subdomain
+
+      // (a) full registered domain embedded in subdomain
+      if (subdomainDepth >= 2 && domain.includes(legitBase + ".") && !domain.endsWith(legitBase)) {
         return { detected: true, reason: "subdomain_hijack", confidence: 92,
           matchedLegit: legit, similarityScore: 85, details }
+      }
+
+      // (b) legit SLD appears as a standalone subdomain label
+      const legitSld = legitBase.split(".")[0] ?? ""
+      if (legitSld.length >= 4 && subdomainLabels.includes(legitSld)) {
+        return { detected: true, reason: "subdomain_hijack", confidence: 88,
+          matchedLegit: legit, similarityScore: 80, details }
       }
     }
   }
@@ -124,8 +148,14 @@ export function detectDomain(
   // ── 8. Typosquat ──────────────────────────────────────────────────────────
   const match = findMostSimilarLegit(registeredDomain, whitelist, typosquatThreshold)
   if (match) {
-    const confidence    = match.score >= 95 ? 95 : match.score >= 90 ? 85 : 70
-    const boosted       = heuristics.score >= HEURISTIC_MEDIUM
+    // Confidence mapped from similarity. >=85 already means SLD is identical
+    // or off by one — treat as high; >=90 means barely-distinguishable squat.
+    const confidence =
+      match.score >= 95 ? 95 :
+      match.score >= 90 ? 90 :
+      match.score >= 85 ? 80 :
+      70
+    const boosted = heuristics.score >= HEURISTIC_MEDIUM
       ? Math.min(confidence + 10, 97) : confidence
     return { detected: true, reason: "typosquat", confidence: boosted,
       matchedLegit: match.domain, similarityScore: match.score, details }

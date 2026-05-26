@@ -84,7 +84,7 @@ export const KNOWN_PHISHING_DOMAINS: readonly string[] = [
   // Uniswap fakes
   "app-uniswap.org", "app-uniswap.io",
   "uniswap.com", "uniswap-app.com",
-  "uniswap-exchange.com", "uniswaap.org", "uniswapdex.io",
+  "uniswap-exchange.com", "uniswapdex.io",
   // OpenSea fakes
   "openseas.io", "open-sea.io", "opensea.com",
   // MetaMask fakes
@@ -95,7 +95,7 @@ export const KNOWN_PHISHING_DOMAINS: readonly string[] = [
   // MEW fakes
   "myetherwallet.com.co", "myetherwllet.com",
   // PancakeSwap fakes
-  "pancakeswap.org", "pancakeswap.com",
+  "pancakeswap.com",
   // Aave fakes
   "defi-aave.com", "aave-app.com",
   // Trust Wallet fakes

@@ -1,122 +1,143 @@
-// Composite scoring — multiple weak signals together = strong signal
-// Solves the problem where each individual check passes but combination is dangerous
+// Composite scoring — multiple weak signals = one strong verdict
+// Solves the problem where each detector fires independently
+// and misses patterns that only become clear in combination
 //
-// Example: approve(unknown) + new contract + ETH value = very suspicious
-// Each alone: medium risk. Together: critical.
+// Example: new contract + medium heuristic + suspicious multicall
+//          = none of them critical alone, but together = critical
 
-export interface SignalWeight {
-  name:       string
-  points:     number
+import type { TxScamReason } from "./types.js"
+import type { DetectionResult } from "./detector.js"
+import type { DelegationRisk }  from "./delegationDetector.js"
+
+export interface CompositeSignal {
   reason:     string
+  weight:     number    // 0–100 contribution to total score
+  fired:      boolean
 }
 
-export interface CompositeScore {
-  total:      number       // 0–100
-  signals:    SignalWeight[]
-  riskLevel:  "none" | "low" | "medium" | "high" | "critical"
-  dominant:   string | null  // most impactful signal
+export interface CompositeResult {
+  totalScore:  number           // 0–100
+  fired:       boolean          // score >= threshold
+  reason:      TxScamReason | null
+  confidence:  number
+  signals:     CompositeSignal[]
+  warning:     string | null
 }
 
-// Signal weights — points added to composite score
-const SIGNAL_WEIGHTS = {
-  // Transaction patterns
-  unlimited_approve_unknown:    45,
-  approve_unknown:              25,
-  delegation_method:            40,
-  delegation_known_protocol:    20,
-  set_approval_for_all_unknown: 50,
-  permit_unknown:               40,
-  permit2_unknown:              40,
-  multicall_approve_transfer:   35,
-  drainer_method_id:            50,
+const COMPOSITE_THRESHOLD = 60   // score needed to flag as scam
 
-  // Contract signals
-  contract_age_very_new:        25,   // < 7 days
-  contract_age_new:             15,   // < 30 days
-  contract_age_recent:          8,    // < 90 days
-  proxy_recently_upgraded:      30,
-  proxy_unknown_impl:           20,
+export function runCompositeScoring(
+  baseDetection: DetectionResult,
+  delegation:    DelegationRisk,
+  contractAge:   number | null,
+  ethValue:      bigint,
+  hasMulticall:  boolean,
+  isProxy:       boolean,
+  proxyImplAge:  number | null,
+): CompositeResult {
 
-  // Value signals
-  eth_value_sent:               10,
-  high_eth_value:               20,   // > 1 ETH
+  const signals: CompositeSignal[] = []
+  let totalScore = 0
 
-  // Context signals
-  typed_data_unknown_spender:   35,
-  seaport_unknown_recipient:    30,
-  token_name_suspicious:        25,
-
-  // Simulation
-  simulation_failed:            30,
-  simulation_balance_loss:      35,
-}
-
-export function buildCompositeScore(activeSignals: Array<keyof typeof SIGNAL_WEIGHTS>): CompositeScore {
-  const signals: SignalWeight[] = []
-  let total = 0
-
-  for (const signal of activeSignals) {
-    const points = SIGNAL_WEIGHTS[signal] ?? 0
-    if (points > 0) {
-      signals.push({ name: signal, points, reason: signalReason(signal) })
-      total += points
+  // ── Already detected by primary detector ─────────────────────────────────
+  if (baseDetection.detected && baseDetection.confidence >= 80) {
+    return {
+      totalScore:  baseDetection.confidence,
+      fired:       true,
+      reason:      baseDetection.reason,
+      confidence:  baseDetection.confidence,
+      signals:     [{ reason: baseDetection.reason ?? "detected", weight: baseDetection.confidence, fired: true }],
+      warning:     baseDetection.warning,
     }
   }
 
-  // Combo amplifier — 3+ signals = +15 bonus
-  if (signals.length >= 3) {
-    total += 15
-    signals.push({ name: "combo_amplifier", points: 15, reason: "Multiple risk signals detected simultaneously" })
-  } else if (signals.length === 2) {
-    total += 8
-    signals.push({ name: "combo_amplifier", points: 8, reason: "Two risk signals detected together" })
+  // ── Accumulate weak signals ────────────────────────────────────────────────
+
+  // Delegation to unknown address (medium confidence alone)
+  if (delegation.detected && delegation.confidence < 80) {
+    const w = 35
+    totalScore += w
+    signals.push({ reason: "delegation_to_unknown", weight: w, fired: true })
   }
 
-  total = Math.min(total, 100)
+  // New contract receiving ETH
+  if (contractAge !== null && contractAge < 30 && ethValue > 0n) {
+    const w = contractAge < 7 ? 30 : 20
+    totalScore += w
+    signals.push({ reason: `new_contract_${contractAge}d_with_eth`, weight: w, fired: true })
+  }
 
-  // Sort by impact
-  signals.sort((a, b) => b.points - a.points)
-  const dominant = signals[0]?.name ?? null
+  // Proxy recently upgraded
+  if (isProxy && proxyImplAge !== null && proxyImplAge < 14) {
+    const w = proxyImplAge < 7 ? 35 : 20
+    totalScore += w
+    signals.push({ reason: `proxy_upgraded_${proxyImplAge}d_ago`, weight: w, fired: true })
+  }
+
+  // Multicall present (weak signal alone, amplifies others)
+  if (hasMulticall) {
+    const w = 15
+    totalScore += w
+    signals.push({ reason: "multicall_present", weight: w, fired: true })
+  }
+
+  // Base detection fired at medium confidence
+  if (baseDetection.detected && baseDetection.confidence >= 50) {
+    const w = baseDetection.confidence * 0.5
+    totalScore += w
+    signals.push({ reason: baseDetection.reason ?? "medium_detection", weight: w, fired: true })
+  }
+
+  // ETH value sent — alone harmless, but amplifies any other suspicious signal.
+  // The pattern "send ETH to freshly-upgraded proxy" or "send ETH to new
+  // contract" is a classic drainer setup.
+  if (ethValue > 0n && signals.length > 0) {
+    const w = 30
+    totalScore += w
+    signals.push({ reason: "eth_value_sent_to_suspicious_target", weight: w, fired: true })
+  }
+
+  const fired = totalScore >= COMPOSITE_THRESHOLD
+
+  if (!fired) {
+    return { totalScore, fired: false, reason: null, confidence: 0, signals, warning: null }
+  }
+
+  // Determine dominant reason
+  const dominantReason = resolveDominantReason(signals, baseDetection, delegation)
+  const confidence     = Math.min(Math.round(totalScore), 95)
 
   return {
-    total,
+    totalScore,
+    fired,
+    reason:    dominantReason,
+    confidence,
     signals,
-    riskLevel: scoreToRisk(total),
-    dominant,
+    warning: buildCompositeWarning(signals, confidence),
   }
 }
 
-function scoreToRisk(score: number): CompositeScore["riskLevel"] {
-  if (score >= 70) return "critical"
-  if (score >= 50) return "high"
-  if (score >= 30) return "medium"
-  if (score >= 15) return "low"
-  return "none"
+function resolveDominantReason(
+  signals:    CompositeSignal[],
+  base:       DetectionResult,
+  delegation: DelegationRisk,
+): TxScamReason {
+  if (delegation.detected) return "ice_phishing"
+  if (base.reason)         return base.reason
+  if (signals.some(s => s.reason.includes("proxy"))) return "proxy_recently_upgraded"
+  if (signals.some(s => s.reason.includes("new_contract"))) return "new_contract"
+  return "suspicious_multicall"
 }
 
-function signalReason(signal: string): string {
-  const reasons: Record<string, string> = {
-    unlimited_approve_unknown:    "Unlimited approval to unknown address",
-    approve_unknown:              "Token approval to unverified address",
-    delegation_method:            "Delegation method grants third-party fund access",
-    delegation_known_protocol:    "Delegation on known protocol — verify the address",
-    set_approval_for_all_unknown: "SetApprovalForAll to unknown operator",
-    permit_unknown:               "Permit signature to unknown spender",
-    permit2_unknown:              "Permit2 approval to unknown address",
-    multicall_approve_transfer:   "Multicall bundles approval with transfer",
-    drainer_method_id:            "Known drainer contract method signature",
-    contract_age_very_new:        "Contract deployed less than 7 days ago",
-    contract_age_new:             "Contract deployed less than 30 days ago",
-    contract_age_recent:          "Contract deployed less than 90 days ago",
-    proxy_recently_upgraded:      "Proxy implementation changed recently",
-    proxy_unknown_impl:           "Proxy implementation is unknown",
-    eth_value_sent:               "ETH is being sent in this transaction",
-    high_eth_value:               "Large ETH amount being sent",
-    typed_data_unknown_spender:   "Typed data signature for unknown spender",
-    seaport_unknown_recipient:    "Seaport order with unknown recipient",
-    token_name_suspicious:        "Token name contains suspicious content",
-    simulation_failed:            "Transaction would revert",
-    simulation_balance_loss:      "Simulation shows unexpected balance loss",
-  }
-  return reasons[signal] ?? signal
+function buildCompositeWarning(signals: CompositeSignal[], confidence: number): string {
+  const fired = signals.filter(s => s.fired)
+  return [
+    `⚠️ Multiple suspicious signals detected (confidence: ${confidence}%)`,
+    ``,
+    `Signals:`,
+    ...fired.map(s => `  • ${s.reason} (+${Math.round(s.weight)}pts)`),
+    ``,
+    `No single signal is conclusive but the combination indicates high risk.`,
+    `Verify this transaction carefully before signing.`,
+  ].join("\n")
 }

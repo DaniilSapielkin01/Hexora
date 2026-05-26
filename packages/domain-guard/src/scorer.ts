@@ -38,6 +38,7 @@ function getRiskLevel(detection: DetectionResult): RiskLevel {
     case "nft_spam_domain":
       return detection.confidence >= 70 ? "high" : "medium"
     case "suspicious_domain":
+    case "suspicious_tld_combo":
       return detection.confidence >= 55 ? "high" : "medium"
     case "typosquat":
       if (detection.confidence >= 90) return "critical"

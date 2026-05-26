@@ -7,8 +7,7 @@
 // With ABI decoding we read the actual function signature from Etherscan.
 
 import type { EIP1193Provider } from "@hexora/core"
-
-const TIMEOUT_MS = 3000
+import { HTTP_TIMEOUT_MS, logEvent } from "@hexora/core"
 
 // Etherscan-compatible API endpoints per chain
 const EXPLORER_APIS: Record<string, string> = {
@@ -26,26 +25,55 @@ export interface DecodedFunction {
   inputs:    Array<{ name: string; type: string; value: string }>
 }
 
-// Cache to avoid repeated API calls for same contract
+// Cache to avoid repeated API calls for same contract.
+// Bounded LRU: Map preserves insertion order, so deleting the oldest key on
+// overflow gives us O(1) LRU semantics without an extra data structure.
+const ABI_CACHE_MAX = 500
 const abiCache = new Map<string, DecodedFunction | null>()
+
+function cacheSet(key: string, value: DecodedFunction | null): void {
+  if (abiCache.has(key)) abiCache.delete(key)
+  abiCache.set(key, value)
+  if (abiCache.size > ABI_CACHE_MAX) {
+    const oldest = abiCache.keys().next().value
+    if (oldest !== undefined) abiCache.delete(oldest)
+  }
+}
+
+function cacheGet(key: string): DecodedFunction | null | undefined {
+  if (!abiCache.has(key)) return undefined
+  const v = abiCache.get(key)
+  // Touch on access — move to most-recently-used end.
+  abiCache.delete(key)
+  abiCache.set(key, v ?? null)
+  return v
+}
+
+// keccak256 implementation must be injected by the caller. We avoid bundling a
+// crypto lib here so consumers can pick their own (ethers, js-sha3, viem, etc.)
+// without us forcing a transitive dep on the published npm package.
+// Without it, ABI matching is disabled and the function returns null after fetch.
+export type Keccak256Fn = (input: string) => string
 
 export async function decodeCalldata(
   contractAddress: string,
   calldata:        string,
   chainId:         string,
-  apiKey?:         string
+  apiKey?:         string,
+  keccak256?:      Keccak256Fn
 ): Promise<DecodedFunction | null> {
   if (!calldata || calldata === "0x" || calldata.length < 10) return null
+  if (!keccak256) return null
 
   const cacheKey = `${chainId}:${contractAddress.toLowerCase()}`
-  if (abiCache.has(cacheKey)) {
-    const cached = abiCache.get(cacheKey)
+  const cached = cacheGet(cacheKey)
+  if (cached !== undefined) {
     return cached ? decodeWithAbi(cached.signature, calldata) : null
   }
 
   const apiBase = EXPLORER_APIS[chainId]
   if (!apiBase) {
-    abiCache.set(cacheKey, null)
+    cacheSet(cacheKey, null)
     return null
   }
 
@@ -57,15 +85,24 @@ export async function decodeCalldata(
     if (apiKey) url.searchParams.set("apikey", apiKey)
 
     const controller = new AbortController()
-    const timeout    = setTimeout(() => controller.abort(), TIMEOUT_MS)
+    const timeout    = setTimeout(() => controller.abort(), HTTP_TIMEOUT_MS)
 
     const res  = await fetch(url.toString(), { signal: controller.signal })
     clearTimeout(timeout)
 
-    if (!res.ok) { abiCache.set(cacheKey, null); return null }
+    if (!res.ok) {
+      logEvent("warn", "abiDecoder", "explorer http error",
+        { chainId, status: res.status })
+      cacheSet(cacheKey, null); return null
+    }
 
     const data = await res.json() as { status: string; result: string }
-    if (data.status !== "1") { abiCache.set(cacheKey, null); return null }
+    if (data.status !== "1") {
+      // Common: contract not verified — expected, log at debug.
+      logEvent("debug", "abiDecoder", "abi not available",
+        { chainId, contract: contractAddress, result: data.result })
+      cacheSet(cacheKey, null); return null
+    }
 
     // Parse ABI and find matching function
     const abi      = JSON.parse(data.result) as Array<{ type: string; name: string; inputs: Array<{ name: string; type: string }> }>
@@ -74,7 +111,7 @@ export async function decodeCalldata(
     for (const item of abi) {
       if (item.type !== "function") continue
       const sig  = `${item.name}(${item.inputs.map(i => i.type).join(",")})`
-      const hash = methodIdFromSig(sig)
+      const hash = methodIdFromSig(sig, keccak256)
 
       if (hash === methodId) {
         const decoded: DecodedFunction = {
@@ -82,15 +119,18 @@ export async function decodeCalldata(
           signature: sig,
           inputs:    decodeParams(calldata.slice(10), item.inputs),
         }
-        abiCache.set(cacheKey, decoded)
+        cacheSet(cacheKey, decoded)
         return decoded
       }
     }
 
-    abiCache.set(cacheKey, null)
+    cacheSet(cacheKey, null)
     return null
-  } catch {
-    abiCache.set(cacheKey, null)
+  } catch (err) {
+    logEvent("warn", "abiDecoder", "fetch failed",
+      { chainId, contract: contractAddress,
+        error: err instanceof Error ? err.message : String(err) })
+    cacheSet(cacheKey, null)
     return null
   }
 }
@@ -143,12 +183,11 @@ function decodeParams(
   return result
 }
 
-// Simple keccak256-like methodId from signature
-// Uses a lookup approach — for full keccak we'd need a crypto library
-// This is used only for ABI matching, not security-critical
-function methodIdFromSig(sig: string): string {
-  // We can't compute keccak256 without a library in pure TS
-  // Return empty — the ABI loop will still work via direct comparison
-  // In production, use ethers.utils.id(sig).slice(0, 10)
-  return ""
+// Compute 4-byte function selector from canonical signature using the
+// caller-provided keccak256. Expected output: "0x" + 8 hex chars, lowercased.
+function methodIdFromSig(sig: string, keccak256?: Keccak256Fn): string {
+  if (!keccak256) return ""
+  const h = keccak256(sig).toLowerCase()
+  const hex = h.startsWith("0x") ? h : `0x${h}`
+  return hex.slice(0, 10)
 }

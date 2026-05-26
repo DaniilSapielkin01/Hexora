@@ -90,7 +90,10 @@ const LEET_SUBSTITUTIONS: Record<string, string> = {
 }
 
 export function hasLeetSubstitution(domain: string): boolean {
-  const sld = domain.split(".")[0] ?? ""
+  // SLD = label immediately before the TLD, not the leftmost label.
+  // For "app.un1swap.org" we want "un1swap", not "app".
+  const parts = domain.split(".")
+  const sld = parts.length >= 2 ? parts[parts.length - 2] ?? "" : parts[0] ?? ""
   return Object.keys(LEET_SUBSTITUTIONS).some((char) => sld.includes(char))
 }
 

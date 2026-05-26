@@ -12,7 +12,7 @@
     "size": "size-limit",
     "build": "pnpm -r build && pnpm size-limit",
     "publish": "pnpm -r publish --access public --no-git-checks",
-    "release": "pnpm changeset && pnpm changeset version && pnpm publish"
+    "release": "pnpm test && pnpm build && pnpm changeset && pnpm changeset version && git add -A && git commit -m \"chore: release\" && pnpm -r publish --access public --no-git-checks && git push --follow-tags"
   },
   "devDependencies": {
     "@changesets/cli": "^2.30.0",

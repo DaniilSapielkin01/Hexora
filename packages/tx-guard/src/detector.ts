@@ -8,7 +8,7 @@ import { parseCalldata, MAX_UINT256 }  from "./calldataParser.js"
 import { analyzeTypedData }            from "./typedDataAnalyzer.js"
 import { detectDelegation }            from "./delegationDetector.js"
 import { detectAATransaction }         from "./aaDetector.js"
-import { runCompositeScoring }         from "./compositeSorcer.js"
+import { runCompositeScoring }         from "./compositeScoring.js"
 import type { RawTransaction, TypedDataPayload, TxScamReason, TxCheckDetails } from "./types.js"
 
 export interface DetectionResult {

@@ -196,6 +196,6 @@ export function runHeuristics(domain: string, registeredDomain: string): Heurist
 // Map heuristic score to reason string
 export function heuristicReason(result: HeuristicResult): string {
   if (result.isCryptoBaitPattern || result.hasHighRiskKeyword) return "nft_spam_domain"
-  if (result.tldSuspicious && result.hasMediumRiskKeyword)     return "suspicious_domain"
+  if (result.tldSuspicious && result.hasMediumRiskKeyword)     return "suspicious_tld_combo"
   return "suspicious_domain"
 }

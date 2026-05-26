@@ -21,25 +21,29 @@ export function calculateSimilarity(a: string, b: string): number {
 function prefixSimilarity(a: string, b: string, len: number): number {
   const pa = a.slice(0, len);
   const pb = b.slice(0, len);
+  const window = Math.min(pa.length, pb.length);
+  if (window === 0) return 0;
   let m = 0;
-  for (let i = 0; i < Math.min(pa.length, pb.length); i++) {
+  for (let i = 0; i < window; i++) {
     const ca = pa[i];
     const cb = pb[i];
     if (ca !== undefined && cb !== undefined && ca === cb) m++;
   }
-  return (m / len) * 100;
+  return (m / window) * 100;
 }
 
 function suffixSimilarity(a: string, b: string, len: number): number {
   const sa = a.slice(-len);
   const sb = b.slice(-len);
+  const window = Math.min(sa.length, sb.length);
+  if (window === 0) return 0;
   let m = 0;
-  for (let i = 0; i < Math.min(sa.length, sb.length); i++) {
+  for (let i = 0; i < window; i++) {
     const ca = sa[i];
     const cb = sb[i];
     if (ca !== undefined && cb !== undefined && ca === cb) m++;
   }
-  return (m / len) * 100;
+  return (m / window) * 100;
 }
 
 function levenshteinSimilarity(a: string, b: string): number {

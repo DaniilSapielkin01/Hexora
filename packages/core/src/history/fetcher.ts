@@ -3,6 +3,12 @@ import {
   NormalizedTransaction,
   HistoryProvider,
 } from "../types/index.js";
+import { logEvent } from "../logger.js";
+import {
+  HISTORY_FETCH_TIMEOUT_MS,
+  HTTP_RETRIES,
+  HTTP_RETRY_DELAY_MS,
+} from "../constants.js";
 
 interface ExplorerConfig {
   baseUrl: string;
@@ -190,35 +196,50 @@ function buildUrl(base: string, params: Record<string, string>): string {
 
 async function fetchWithRetry(
   url: string,
-  retries = 2,
-  delay = 1000
+  retries = HTTP_RETRIES,
+  delay   = HTTP_RETRY_DELAY_MS
 ): Promise<{ result: unknown } | null> {
   for (let i = 0; i <= retries; i++) {
     try {
       const res = await fetch(url, {
         headers: { Accept: "application/json" },
-        signal: AbortSignal.timeout(8000),
+        signal: AbortSignal.timeout(HISTORY_FETCH_TIMEOUT_MS),
       });
       if (!res.ok) {
         if (res.status === 429 && i < retries) {
+          logEvent("warn", "historyFetcher", "rate limited, retrying",
+            { attempt: i + 1, status: res.status });
           await sleep(delay * (i + 1));
           continue;
         }
+        logEvent("warn", "historyFetcher", "http error",
+          { status: res.status });
         return null;
       }
       const json = await res.json();
-      if (json?.status === "0" && json?.message !== "No transactions found")
+      if (json?.status === "0" && json?.message !== "No transactions found") {
+        logEvent("warn", "historyFetcher", "explorer api error",
+          { message: json?.message, result: json?.result });
         return null;
+      }
       return json;
-    } catch {
+    } catch (err) {
       if (i < retries) {
+        logEvent("warn", "historyFetcher", "network error, retrying",
+          { attempt: i + 1, error: errMsg(err) });
         await sleep(delay);
         continue;
       }
+      logEvent("error", "historyFetcher", "network error, giving up",
+        { error: errMsg(err) });
       return null;
     }
   }
   return null;
+}
+
+function errMsg(e: unknown): string {
+  return e instanceof Error ? e.message : String(e);
 }
 
 function sleep(ms: number): Promise<void> {

@@ -5,6 +5,7 @@
 // UserOperation structure:
 // { sender, nonce, initCode, callData, callGasLimit, ... paymasterAndData, signature }
 
+import { decodeFunctionData, parseAbi } from "viem"
 import { parseCalldata } from "./calldataParser.js"
 import { isDelegationMethod } from "./knownProtocols.js"
 import { KNOWN_DRAINER_METHOD_IDS } from "./methodIds.js"
@@ -112,25 +113,110 @@ export function isAATransaction(toAddress: string): boolean {
   return ENTRY_POINTS.has(toAddress.toLowerCase())
 }
 
-// Extract UserOperation from callData of EntryPoint transaction
-// EntryPoint.handleOps(UserOperation[],address) = 0x1fad948c
-export function extractUserOp(callData: string): UserOperation | null {
-  if (!callData || callData.length < 10) return null
-  const methodId = callData.slice(0, 10)
-  if (methodId !== "0x1fad948c") return null
+// EntryPoint selectors.
+const HANDLE_OPS_V06_SELECTOR = "0x1fad948c"   // v0.6
+const HANDLE_OPS_V07_SELECTOR = "0x765e827f"   // v0.7 (packed)
 
+// Detect whether the given callData is an EntryPoint.handleOps call (any version).
+export function isHandleOpsCalldata(callData: string): boolean {
+  if (!callData || callData.length < 10) return false
+  const sel = callData.slice(0, 10).toLowerCase()
+  return sel === HANDLE_OPS_V06_SELECTOR || sel === HANDLE_OPS_V07_SELECTOR
+}
+
+// v0.6 — UserOperation tuple has 11 fields.
+const HANDLE_OPS_V06_ABI = parseAbi([
+  "function handleOps((address sender, uint256 nonce, bytes initCode, bytes callData, uint256 callGasLimit, uint256 verificationGasLimit, uint256 preVerificationGas, uint256 maxFeePerGas, uint256 maxPriorityFeePerGas, bytes paymasterAndData, bytes signature)[] ops, address beneficiary)",
+])
+
+// v0.7 — fields packed into bytes32 (accountGasLimits, gasFees) for cheaper
+// calldata. We decode into the same v0.6-shaped UserOperation by unpacking.
+const HANDLE_OPS_V07_ABI = parseAbi([
+  "function handleOps((address sender, uint256 nonce, bytes initCode, bytes callData, bytes32 accountGasLimits, uint256 preVerificationGas, bytes32 gasFees, bytes paymasterAndData, bytes signature)[] ops, address beneficiary)",
+])
+
+// Extract UserOperations from EntryPoint.handleOps calldata.
+// Returns [] if the calldata isn't handleOps or fails to decode. Uses viem
+// so we don't maintain a hand-rolled dynamic ABI decoder (previous version
+// returned garbage from fixed-offset slicing).
+export function extractUserOps(callData: string): UserOperation[] {
+  if (!isHandleOpsCalldata(callData)) return []
+  const data = callData as `0x${string}`
+  const sel  = callData.slice(0, 10).toLowerCase()
   try {
-    // Simplified extraction — gets the callData field from first UserOp
-    // Full ABI decoding would need a proper library
-    const params = callData.slice(10)
-    // UserOp callData starts at a known offset in the ABI encoding
-    // This is a simplified heuristic
-    return {
-      sender:   "0x" + params.slice(24, 64),
-      nonce:    "0x" + params.slice(64, 128),
-      callData: "0x" + params.slice(128, 256),
+    if (sel === HANDLE_OPS_V06_SELECTOR) {
+      const { args } = decodeFunctionData({ abi: HANDLE_OPS_V06_ABI, data })
+      return (args[0] as ReadonlyArray<V06Op>).map(toUserOp_V06)
     }
+    const { args } = decodeFunctionData({ abi: HANDLE_OPS_V07_ABI, data })
+    return (args[0] as ReadonlyArray<V07Op>).map(toUserOp_V07)
   } catch {
-    return null
+    return []
   }
+}
+
+type V06Op = {
+  sender: string; nonce: bigint;
+  initCode: string; callData: string;
+  callGasLimit: bigint; verificationGasLimit: bigint;
+  preVerificationGas: bigint; maxFeePerGas: bigint;
+  maxPriorityFeePerGas: bigint;
+  paymasterAndData: string; signature: string;
+}
+
+type V07Op = {
+  sender: string; nonce: bigint;
+  initCode: string; callData: string;
+  accountGasLimits: string;
+  preVerificationGas: bigint;
+  gasFees: string;
+  paymasterAndData: string; signature: string;
+}
+
+function toUserOp_V06(op: V06Op): UserOperation {
+  return {
+    sender:               op.sender,
+    nonce:                "0x" + op.nonce.toString(16),
+    initCode:             op.initCode,
+    callData:             op.callData,
+    callGasLimit:         "0x" + op.callGasLimit.toString(16),
+    verificationGasLimit: "0x" + op.verificationGasLimit.toString(16),
+    preVerificationGas:   "0x" + op.preVerificationGas.toString(16),
+    maxFeePerGas:         "0x" + op.maxFeePerGas.toString(16),
+    maxPriorityFeePerGas: "0x" + op.maxPriorityFeePerGas.toString(16),
+    paymasterAndData:     op.paymasterAndData,
+    signature:            op.signature,
+  }
+}
+
+// Unpack v0.7 bytes32 fields: high 16 bytes + low 16 bytes per field.
+function toUserOp_V07(op: V07Op): UserOperation {
+  const [verificationGasLimit, callGasLimit]    = splitBytes32(op.accountGasLimits)
+  const [maxPriorityFeePerGas, maxFeePerGas]    = splitBytes32(op.gasFees)
+  return {
+    sender:               op.sender,
+    nonce:                "0x" + op.nonce.toString(16),
+    initCode:             op.initCode,
+    callData:             op.callData,
+    callGasLimit:         "0x" + callGasLimit.toString(16),
+    verificationGasLimit: "0x" + verificationGasLimit.toString(16),
+    preVerificationGas:   "0x" + op.preVerificationGas.toString(16),
+    maxFeePerGas:         "0x" + maxFeePerGas.toString(16),
+    maxPriorityFeePerGas: "0x" + maxPriorityFeePerGas.toString(16),
+    paymasterAndData:     op.paymasterAndData,
+    signature:            op.signature,
+  }
+}
+
+function splitBytes32(hex: string): [bigint, bigint] {
+  const clean = hex.startsWith("0x") ? hex.slice(2) : hex
+  const high  = clean.slice(0, 32)   // first 16 bytes
+  const low   = clean.slice(32, 64)  // last 16 bytes
+  return [BigInt("0x" + (high || "0")), BigInt("0x" + (low || "0"))]
+}
+
+// Back-compat shim — returns the first UserOp from a handleOps bundle.
+export function extractUserOp(callData: string): UserOperation | null {
+  const ops = extractUserOps(callData)
+  return ops[0] ?? null
 }

@@ -127,10 +127,17 @@ function extractUint256(params: string, byteOffset: number): bigint | null {
   }
 }
 
-// Extract bool at 32-byte slot offset
-function extractBool(params: string, byteOffset: number): boolean | null {
+// Extract bool at 32-byte slot offset.
+// Standard ABI encodes bool as a 32-byte uint that's strictly 0 or 1.
+// We parse as BigInt so malformed/garbage data (e.g. uint=5 in a bool slot)
+// is treated as "unknown" rather than silently being interpreted as true.
+export function extractBool(params: string, byteOffset: number): boolean | null {
   const start = byteOffset * 2
   const slice = params.slice(start, start + 64)
   if (slice.length < 64) return null
-  return slice.endsWith("1")
+  let n: bigint
+  try { n = BigInt("0x" + slice) } catch { return null }
+  if (n === 0n) return false
+  if (n === 1n) return true
+  return null
 }

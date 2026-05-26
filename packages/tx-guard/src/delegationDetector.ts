@@ -6,6 +6,7 @@
 // Attacker used fake Zoom → victim signed updateDelegate() → attacker drained funds
 
 import { DELEGATION_METHOD_IDS, KNOWN_PROTOCOL_ADDRESSES, isKnownProtocol } from "./knownProtocols.js"
+import { extractBool } from "./calldataParser.js"
 import type { RawTransaction } from "./types.js"
 
 export interface DelegationRisk {
@@ -43,12 +44,11 @@ export function detectDelegation(tx: RawTransaction): DelegationRisk {
     delegate = "0x" + params.slice(24, 64).toLowerCase()
   }
 
-  // Extract bool param (second param — true = granting, false = revoking)
-  let granting = true  // assume granting if we can't determine
-  if (params.length >= 128) {
-    const boolSlice = params.slice(64, 128)
-    granting = !boolSlice.endsWith("0")
-  }
+  // Extract bool param (second param — true = granting, false = revoking).
+  // Fail-safe: if the bool slot is malformed/garbage, assume granting so we
+  // err toward flagging suspicious patterns rather than letting them through.
+  const parsedBool = params.length >= 128 ? extractBool(params, 32) : null
+  const granting   = parsedBool === null ? true : parsedBool
 
   // If revoking delegation — that's actually GOOD, user is protecting themselves
   if (!granting) {

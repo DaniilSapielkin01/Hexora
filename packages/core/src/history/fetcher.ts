@@ -168,15 +168,21 @@ function normalizeEVMTokenTx(
   userAddress: string
 ): NormalizedTransaction {
   const tokenValue = BigInt(tx.value || "0");
+  // Mirror the null-safety used in normalizeEVMTx — Etherscan can return
+  // empty / partial rows and unguarded .toLowerCase() would crash the whole
+  // history fetch on a single malformed entry.
+  const from = (tx.from || "").toLowerCase();
+  const to   = (tx.to   || "").toLowerCase();
+  const userLower = userAddress.toLowerCase();
   return {
     hash: tx.hash,
-    from: tx.from.toLowerCase(),
-    to: tx.to.toLowerCase(),
+    from,
+    to,
     value: 0n,
     tokenValue,
     timestamp: Number(tx.timeStamp),
     blockNumber: Number(tx.blockNumber),
-    isIncoming: tx.to.toLowerCase() === userAddress.toLowerCase(),
+    isIncoming: to === userLower,
     contractAddress: tx.contractAddress,
     isZeroValue: tokenValue === 0n,
     isBatchPoison: tokenValue === 0n,

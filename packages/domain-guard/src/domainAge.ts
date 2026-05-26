@@ -112,18 +112,25 @@ export function applyAgeSignal(
     return { confidence: localConfidence, boosted: false, ageBonus: 0 }
   }
 
+  // Bonus = base (age-tier alone) + linear amplifier scaled by heuristicScore.
+  // Previously these were step functions ("heuristicScore > 0 ? 25 : 15"),
+  // which created brittle 10-point jumps when a single signal in the adjacent
+  // heuristics module flipped on/off. Continuous interpolation keeps the
+  // intent (newer + more heuristic signals → bigger bonus) but is stable to
+  // small changes in the underlying scoring.
   let bonus = 0
 
   if (age.isVeryNew) {
-    // < 7 days + any heuristic signal = almost certainly scam
-    bonus = heuristicScore > 0 ? 25 : 15
+    // < 7 days — strong base, scales up to +25 at heuristicScore=20
+    bonus = 15 + Math.min(10, heuristicScore / 2)
   } else if (age.isNew) {
-    // < 30 days
-    bonus = heuristicScore > 20 ? 18 : 10
+    // < 30 days — moderate base, scales up to +18 at heuristicScore=40
+    bonus = 10 + Math.min(8, heuristicScore / 5)
   } else if (age.isRecent) {
-    // < 90 days — weak signal alone, meaningful in combination
-    bonus = heuristicScore > 30 ? 10 : 5
+    // < 90 days — weak alone, scales up to +10 at heuristicScore=50
+    bonus = 5 + Math.min(5, heuristicScore / 10)
   }
+  bonus = Math.round(bonus)
 
   if (bonus === 0) {
     return { confidence: localConfidence, boosted: false, ageBonus: 0 }

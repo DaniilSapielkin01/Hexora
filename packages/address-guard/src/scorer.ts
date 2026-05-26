@@ -36,7 +36,11 @@ export function buildResult(input: ScorerInput): CheckResult {
       reason: input.inputAddrDetection.reason,
       weight: input.inputAddrDetection.confidence,
     });
-  if (input.similarityScore >= 85)
+  // Trust the upstream similarity match: findMostSimilar already filtered by
+  // the caller-supplied threshold (default 85, but can be lowered). Re-gating
+  // on a hardcoded 85 here would silently discard valid lowered-threshold
+  // matches.
+  if (input.matchedAddress !== null && input.similarityScore > 0)
     signals.push({
       reason: "address_poisoning",
       weight: input.similarityScore,
@@ -46,10 +50,20 @@ export function buildResult(input: ScorerInput): CheckResult {
   signals.sort((a, b) => b.weight - a.weight);
   const top = signals[0];
   const riskScore = top?.weight ?? 0;
-  const confidence =
-    signals.length > 1
-      ? Math.min(100, riskScore + signals.length * 3)
-      : riskScore;
+
+  // Multi-signal amplifier: each additional signal beyond the top one adds
+  // 7 points to confidence (capped at 100). This rewards composite evidence
+  // — three independent medium signals are stronger than one isolated one
+  // and the previous +3-per-signal under-rewarded that.
+  const extra = Math.max(0, signals.length - 1);
+  const confidence = Math.min(100, riskScore + extra * 7);
+
+  // Scam flag: any single >=70, OR a combination of >=2 signals where the
+  // strongest is at least 50. Catches drip-attack patterns where no single
+  // signal is conclusive but the pile is unambiguous.
+  const scam =
+    top !== undefined &&
+    (riskScore >= 70 || (signals.length >= 2 && riskScore >= 50));
 
   const details: CheckDetails = {
     chain: input.chain,
@@ -62,7 +76,7 @@ export function buildResult(input: ScorerInput): CheckResult {
   };
 
   return {
-    scam: top !== undefined && riskScore >= 70,
+    scam,
     reason: top?.reason ?? null,
     riskLevel: toRiskLevel(riskScore, signals.length),
     similarityScore: input.similarityScore,

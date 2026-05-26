@@ -98,7 +98,12 @@ async function getContractDeployAge(
     ) as string
 
     if (codeAtCheckBlock && codeAtCheckBlock !== "0x") {
-      // Contract existed 30 days ago — old, not suspicious
+      // Policy: scoring only distinguishes <7d / <30d / older buckets.
+      // We return a synthetic "30" here on purpose — extending the binary
+      // search to the genesis block would add ~25 extra RPC calls per check
+      // without ever changing the verdict. If a future feature ever needs
+      // the actual deployment date (e.g. UI display), add a dedicated
+      // `getExactContractAge()` function rather than bloating this one.
       return 30
     }
 

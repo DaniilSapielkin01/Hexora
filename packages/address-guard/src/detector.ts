@@ -37,13 +37,17 @@ export function analyzeInputAddress(
     if (!reason) reason = "zero_value_transfer";
   }
 
-  const dustSent = inputAddrHistory.filter(
-    (tx) =>
-      tx.from === addr &&
-      !tx.isZeroValue &&
-      tx.value > 0n &&
-      tx.value < dustThreshold
-  );
+  // Dust covers both native (value > 0) and ERC-20 (tokenValue > 0) sends.
+  // Real attackers almost always use token dust because gas on native dust
+  // is unprofitable. The previous version only counted native — missing
+  // the majority of real attacks.
+  const dustSent = inputAddrHistory.filter((tx) => {
+    if (tx.from !== addr || tx.isZeroValue) return false;
+    const nativeDust = tx.value      > 0n && tx.value      < dustThreshold;
+    const tokenDust  = tx.tokenValue !== undefined &&
+                       tx.tokenValue > 0n && tx.tokenValue < dustThreshold;
+    return nativeDust || tokenDust;
+  });
   const uniqueTargets = new Set(dustSent.map((tx) => tx.to)).size;
   if (uniqueTargets >= 5) {
     evidence.push(`Address sent dust to ${uniqueTargets} unique addresses`);
@@ -83,19 +87,20 @@ export function analyzeUserHistory(
   batchPoisonFound: boolean;
   dustFound: boolean;
   transferFromFound: boolean;
-  evidence: string[];
 } {
-  const evidence: string[] = [];
   const inputLower = inputAddress.toLowerCase();
-  const userLower = userAddress.toLowerCase();
-  const fromInput = userHistory.filter((tx) => tx.from === inputLower);
+  const userLower  = userAddress.toLowerCase();
+  const fromInput  = userHistory.filter((tx) => tx.from === inputLower);
 
-  const zeroValueFound = fromInput.some((tx) => tx.isZeroValue);
+  const zeroValueFound   = fromInput.some((tx) => tx.isZeroValue);
   const batchPoisonFound = fromInput.some((tx) => tx.isBatchPoison);
-  const dustFound = fromInput.some(
-    (tx) =>
-      !tx.isZeroValue && tx.value > 0n && tx.value < DEFAULT_DUST_THRESHOLD
-  );
+  const dustFound = fromInput.some((tx) => {
+    if (tx.isZeroValue) return false;
+    const native = tx.value      > 0n && tx.value      < DEFAULT_DUST_THRESHOLD;
+    const token  = tx.tokenValue !== undefined &&
+                   tx.tokenValue > 0n && tx.tokenValue < DEFAULT_DUST_THRESHOLD;
+    return native || token;
+  });
   const transferFromFound = userHistory.some(
     (tx) =>
       tx.from === userLower &&
@@ -105,20 +110,5 @@ export function analyzeUserHistory(
       tx.contractAddress !== userLower
   );
 
-  if (zeroValueFound)
-    evidence.push(`Incoming zero-value transfer from ${inputAddress}`);
-  if (batchPoisonFound)
-    evidence.push(`Batch poisoning transaction from ${inputAddress}`);
-  if (dustFound)
-    evidence.push(`Dust transaction received from ${inputAddress}`);
-  if (transferFromFound)
-    evidence.push(`transferFrom spoofing detected involving ${inputAddress}`);
-
-  return {
-    zeroValueFound,
-    batchPoisonFound,
-    dustFound,
-    transferFromFound,
-    evidence,
-  };
+  return { zeroValueFound, batchPoisonFound, dustFound, transferFromFound };
 }

@@ -18,8 +18,12 @@ export async function simulateTransaction(
   provider: EIP1193Provider
 ): Promise<SimulationResult> {
   try {
-    // ── 1. Get ETH balance before ───────────────────────────────────────────
-    const [balanceBefore, chainId] = await Promise.all([
+    // ── 1. Get ETH balance + chain + gas price in parallel ─────────────────
+    // gasPrice is needed for the gasCost estimate below — hardcoding 20 gwei
+    // produced ETH-delta numbers off by 10×+ on L2s (~0.001 gwei) and during
+    // L1 spikes (>100 gwei). We fetch it but tolerate failure (some chains
+    // return only base fee / EIP-1559 fee) by falling back to a sane default.
+    const [balanceBefore, chainId, gasPriceHex] = await Promise.all([
       withTimeout(
         provider.request({ method: "eth_getBalance", params: [tx.from, "latest"] }),
         TIMEOUT_MS
@@ -28,7 +32,12 @@ export async function simulateTransaction(
         provider.request({ method: "eth_chainId", params: [] }),
         TIMEOUT_MS
       ) as Promise<string>,
+      withTimeout(
+        provider.request({ method: "eth_gasPrice", params: [] }),
+        TIMEOUT_MS
+      ).catch(() => null) as Promise<string | null>,
     ])
+    const gasPrice = safeGasPrice(gasPriceHex)
 
     // ── 2. Simulate via eth_call ────────────────────────────────────────────
     // eth_call runs the tx without broadcasting — returns what would happen
@@ -63,7 +72,7 @@ export async function simulateTransaction(
 
     // ── 4. Calculate ETH delta ──────────────────────────────────────────────
     const ethValue  = tx.value ? BigInt(tx.value) : 0n
-    const gasCost   = gasEstimate ? gasEstimate * 20_000_000_000n : 0n  // ~20 gwei estimate
+    const gasCost   = gasEstimate ? gasEstimate * gasPrice : 0n
     const ethDelta  = -(ethValue + gasCost)
 
     // ── 5. Detect token transfers via eth_getLogs simulation ────────────────
@@ -126,4 +135,16 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
       setTimeout(() => reject(new Error("timeout")), ms)
     ),
   ])
+}
+
+// Parse provider-returned gasPrice. Falls back to 20 gwei if unavailable
+// or malformed — that's still a reasonable L1 estimate and only affects
+// the informational ethDelta, not the scam verdict.
+const FALLBACK_GAS_PRICE = 20_000_000_000n   // 20 gwei
+function safeGasPrice(hex: string | null): bigint {
+  if (!hex) return FALLBACK_GAS_PRICE
+  try {
+    const v = BigInt(hex)
+    return v > 0n ? v : FALLBACK_GAS_PRICE
+  } catch { return FALLBACK_GAS_PRICE }
 }

@@ -20,5 +20,8 @@ export function validateAddress(address: string, chain: ChainId): boolean {
       /^bc1[a-z0-9]{6,87}$/.test(address)
     );
   if (chain === "tron") return /^T[a-km-zA-HJ-NP-Z1-9]{33}$/.test(address);
-  return address.length > 0;
+  // Unknown chain — refuse rather than accepting any non-empty string.
+  // Permissive default would let downstream code feed garbage into history
+  // fetchers/detectors that assume a recognized format.
+  return false;
 }

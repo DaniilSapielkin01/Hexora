@@ -1,4 +1,3 @@
-import { domainToUnicode } from "node:url"
 import { KNOWN_LEGIT_DOMAINS, KNOWN_PHISHING_DOMAINS } from "./knownDomains.js"
 import {
   normalizeDomain, getRegisteredDomain, getSubdomainDepth,
@@ -92,12 +91,13 @@ export function detectDomain(
   }
 
   // ── 5. IDN / Punycode ─────────────────────────────────────────────────────
-  // Decode punycode (xn--…) to the actual unicode form, then strip homoglyphs
-  // so we can compare against latin whitelist domains.
+  // For punycode labels (xn--…) the ASCII basic codepoints are encoded
+  // verbatim before the final dash, with unicode insertions hashed after.
+  // Stripping back to the basic ASCII form is enough for similarity check
+  // against the latin whitelist — avoids a heavy punycode decoder dep and
+  // keeps the module browser-safe (no node:url).
   if (idn) {
-    let decoded = domain
-    try { decoded = domainToUnicode(domain) || domain } catch { /* keep raw */ }
-    decoded = normalizeHomoglyphs(decoded)
+    const decoded = normalizeHomoglyphs(stripPunycode(domain))
     const match = findMostSimilarLegit(getRegisteredDomain(decoded), whitelist, 70)
     if (match) {
       return { detected: true, reason: "idn_suspicious", confidence: 90,
@@ -174,4 +174,19 @@ export function detectDomain(
   // ── Clean ─────────────────────────────────────────────────────────────────
   return { detected: false, reason: null, confidence: 0,
     matchedLegit: null, similarityScore: 0, details }
+}
+
+// Strip the punycode envelope from each label, returning the ASCII-basic body.
+// "xn--unisap-n2a.org" → "unisap.org". Not a full decoder — we only need
+// something close enough for similarity matching against the whitelist.
+function stripPunycode(domain: string): string {
+  return domain
+    .split(".")
+    .map(label => {
+      if (!label.startsWith("xn--")) return label
+      const body = label.slice(4)
+      const dash = body.lastIndexOf("-")
+      return dash > 0 ? body.slice(0, dash) : body
+    })
+    .join(".")
 }

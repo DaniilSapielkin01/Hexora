@@ -24,7 +24,8 @@
     "dev": "tsc --watch"
   },
   "dependencies": {
-    "@hexora/core": "workspace:*"
+    "@hexora/core": "workspace:*",
+    "viem": "^2.51.0"
   },
   "devDependencies": {
     "typescript": "^5.5.4",

@@ -95,8 +95,12 @@ export function analyzeTypedData(payload: TypedDataPayload): TypedDataRisk {
 
     if (consideration && Array.isArray(consideration)) {
       for (const item of consideration) {
-        const recipient = String(item["recipient"] ?? "")
-        if (recipient && !KNOWN_ROUTERS.has(recipient.toLowerCase())) {
+        // Strict type-check: a `null` recipient was previously coerced via
+        // String(null) → "null" and treated as a real recipient (false
+        // positive). Skip anything that isn't a non-empty string.
+        const recipient = item["recipient"]
+        if (typeof recipient !== "string" || !recipient) continue
+        if (!KNOWN_ROUTERS.has(recipient.toLowerCase())) {
           return {
             detected:   true,
             reason:     "seaport_order_spoof",

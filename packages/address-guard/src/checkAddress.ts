@@ -4,6 +4,7 @@ import {
   findMostSimilar,
   DefaultHistoryProvider,
   txCache,
+  logEvent,
 } from "@hexora/core";
 import type { NormalizedTransaction } from "@hexora/core";
 import type { CheckAddressParams, CheckResult } from "./types.js";
@@ -54,27 +55,39 @@ export async function checkAddress(
     );
 
   // Step 3: fetch history (in-memory cache, 5 min TTL)
+  // Both fetches run concurrently. allSettled — so a failure on the input
+  // address fetch doesn't lose the user history (and vice versa); each
+  // independent signal still contributes whatever data it could pull.
   const fetcher = historyProvider ?? new DefaultHistoryProvider(apiKeys);
   let userHistory: NormalizedTransaction[] = [];
   let inputAddrHistory: NormalizedTransaction[] = [];
 
-  try {
-    const cached = txCache.get(userAddress, chain);
-    const [userTxs, inputTxs] = await Promise.all([
-      cached
-        ? Promise.resolve(cached)
-        : fetcher.getTransactions(
-            userAddress,
-            chain,
-            Math.min(historyLimit, 50)
-          ),
-      fetcher.getTransactions(inputAddress, chain, 50),
-    ]);
-    if (!cached) txCache.set(userAddress, chain, userTxs);
-    userHistory = userTxs;
-    inputAddrHistory = inputTxs;
-  } catch {
-    /* continue with empty history */
+  const cachedUser  = txCache.get(userAddress,  chain);
+  const cachedInput = txCache.get(inputAddress, chain);
+
+  const [userRes, inputRes] = await Promise.allSettled([
+    cachedUser
+      ? Promise.resolve(cachedUser)
+      : fetcher.getTransactions(userAddress, chain, Math.min(historyLimit, 50)),
+    cachedInput
+      ? Promise.resolve(cachedInput)
+      : fetcher.getTransactions(inputAddress, chain, 50),
+  ]);
+
+  if (userRes.status === "fulfilled") {
+    userHistory = userRes.value;
+    if (!cachedUser) txCache.set(userAddress, chain, userHistory);
+  } else {
+    logEvent("warn", "checkAddress", "user history fetch failed",
+      { chain, error: errMsg(userRes.reason) });
+  }
+
+  if (inputRes.status === "fulfilled") {
+    inputAddrHistory = inputRes.value;
+    if (!cachedInput) txCache.set(inputAddress, chain, inputAddrHistory);
+  } else {
+    logEvent("warn", "checkAddress", "input history fetch failed",
+      { chain, error: errMsg(inputRes.reason) });
   }
 
   // Step 4: similarity check
@@ -115,15 +128,26 @@ export async function checkAddress(
   });
 }
 
+// Build the set of peers we'll check `inputAddress` against for similarity.
+// Address-poisoning attacks copy an EOA the user has previously transacted
+// with — comparing the input to a contract address (DEX router, token,
+// protocol) is meaningless and produces false positives. Heuristic: if a tx
+// carries a methodId it's a contract call, so the `to` is a contract; we
+// only treat it as a peer when there's no methodId (plain transfer).
 function extractKnownAddresses(
   history: NormalizedTransaction[],
   userAddress: string
 ): string[] {
   const lower = userAddress.toLowerCase();
-  const seen = new Set<string>();
+  const seen  = new Set<string>();
   for (const tx of history) {
-    if (tx.from === lower && tx.to) seen.add(tx.to);
+    const isContractCall = !!tx.methodId && tx.methodId !== "0x";
+    if (tx.from === lower && tx.to && !isContractCall) seen.add(tx.to);
     if (tx.to === lower && tx.from && !tx.isZeroValue) seen.add(tx.from);
   }
   return Array.from(seen);
+}
+
+function errMsg(e: unknown): string {
+  return e instanceof Error ? e.message : String(e);
 }

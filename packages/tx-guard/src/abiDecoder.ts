@@ -8,6 +8,7 @@
 
 import type { EIP1193Provider } from "@hexora/core"
 import { HTTP_TIMEOUT_MS, logEvent } from "@hexora/core"
+import { keccak256, toBytes, decodeAbiParameters, type AbiParameter } from "viem"
 
 // Etherscan-compatible API endpoints per chain
 const EXPLORER_APIS: Record<string, string> = {
@@ -49,21 +50,23 @@ function cacheGet(key: string): DecodedFunction | null | undefined {
   return v
 }
 
-// keccak256 implementation must be injected by the caller. We avoid bundling a
-// crypto lib here so consumers can pick their own (ethers, js-sha3, viem, etc.)
-// without us forcing a transitive dep on the published npm package.
-// Without it, ABI matching is disabled and the function returns null after fetch.
+// Caller may pass a custom keccak256 (e.g. a faster native binding); by
+// default we use viem's. Signature: takes the canonical function signature
+// string ("approve(address,uint256)") and returns the 0x-prefixed 32-byte
+// hash; we slice the first 4 bytes for the selector.
 export type Keccak256Fn = (input: string) => string
+
+const defaultKeccak: Keccak256Fn = (s) => keccak256(toBytes(s))
 
 export async function decodeCalldata(
   contractAddress: string,
   calldata:        string,
   chainId:         string,
   apiKey?:         string,
-  keccak256?:      Keccak256Fn
+  customKeccak?:   Keccak256Fn
 ): Promise<DecodedFunction | null> {
   if (!calldata || calldata === "0x" || calldata.length < 10) return null
-  if (!keccak256) return null
+  const hashFn = customKeccak ?? defaultKeccak
 
   const cacheKey = `${chainId}:${contractAddress.toLowerCase()}`
   const cached = cacheGet(cacheKey)
@@ -111,7 +114,7 @@ export async function decodeCalldata(
     for (const item of abi) {
       if (item.type !== "function") continue
       const sig  = `${item.name}(${item.inputs.map(i => i.type).join(",")})`
-      const hash = methodIdFromSig(sig, keccak256)
+      const hash = methodIdFromSig(sig, hashFn)
 
       if (hash === methodId) {
         const decoded: DecodedFunction = {
@@ -158,36 +161,42 @@ function decodeWithAbi(signature: string, calldata: string): DecodedFunction {
   return { name, signature, inputs: [] }
 }
 
+// Decode params via viem — handles full ABI spec (dynamic types, tuples,
+// arrays). Previously we did fixed-32-byte-slot extraction which was wrong
+// for `bool` (uint→endsWith heuristic) and broken for any dynamic type.
 function decodeParams(
   params: string,
   inputs: Array<{ name: string; type: string }>
 ): Array<{ name: string; type: string; value: string }> {
-  const result = []
-  for (let i = 0; i < inputs.length; i++) {
-    const input  = inputs[i]
-    if (!input) continue
-    const offset = i * 64
-    const slice  = params.slice(offset, offset + 64)
-    let value    = slice
-
-    if (input.type === "address") {
-      value = "0x" + slice.slice(24)
-    } else if (input.type === "bool") {
-      value = slice.endsWith("1") ? "true" : "false"
-    } else if (input.type.startsWith("uint")) {
-      try { value = BigInt("0x" + slice).toString() } catch { /* keep hex */ }
-    }
-
-    result.push({ name: input.name, type: input.type, value })
+  if (inputs.length === 0) return []
+  try {
+    const abiParams = inputs.map(i => ({ name: i.name, type: i.type } as AbiParameter))
+    const data = `0x${params}` as `0x${string}`
+    const values = decodeAbiParameters(abiParams, data)
+    return inputs.map((input, i) => ({
+      name:  input.name,
+      type:  input.type,
+      value: stringifyAbiValue(values[i]),
+    }))
+  } catch {
+    // Malformed calldata — return inputs with empty values rather than
+    // throwing, so downstream detectors keep working on the function name.
+    return inputs.map(input => ({ name: input.name, type: input.type, value: "" }))
   }
-  return result
 }
 
-// Compute 4-byte function selector from canonical signature using the
-// caller-provided keccak256. Expected output: "0x" + 8 hex chars, lowercased.
-function methodIdFromSig(sig: string, keccak256?: Keccak256Fn): string {
-  if (!keccak256) return ""
-  const h = keccak256(sig).toLowerCase()
+function stringifyAbiValue(v: unknown): string {
+  if (v === null || v === undefined) return ""
+  if (typeof v === "bigint") return v.toString()
+  if (typeof v === "string") return v
+  if (typeof v === "boolean") return v ? "true" : "false"
+  try { return JSON.stringify(v, (_, x) => typeof x === "bigint" ? x.toString() : x) }
+  catch { return String(v) }
+}
+
+// Compute 4-byte function selector from canonical signature.
+function methodIdFromSig(sig: string, hashFn: Keccak256Fn): string {
+  const h = hashFn(sig).toLowerCase()
   const hex = h.startsWith("0x") ? h : `0x${h}`
   return hex.slice(0, 10)
 }

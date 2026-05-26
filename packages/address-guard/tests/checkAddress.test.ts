@@ -84,6 +84,84 @@ describe("Detector", () => {
   });
 });
 
+describe("Detector — ERC-20 dust", () => {
+  const mkTokenDust = (to: string, n: number): NormalizedTransaction => ({
+    hash: `0xdust${n}`,
+    from: PHISH.toLowerCase(),
+    to: to.toLowerCase(),
+    value: 0n,                         // native value is 0 for token transfers
+    tokenValue: 100n,                  // dust amount in token base units
+    timestamp: 1700000000 + n,
+    blockNumber: 1000 + n,
+    isIncoming: false,
+    contractAddress: "0xtoken",
+    isZeroValue: false,
+    isBatchPoison: false,
+  });
+
+  test("detects token-based dust attack (5+ unique targets)", () => {
+    const txs = Array.from({ length: 5 }, (_, i) =>
+      mkTokenDust(`0x${i}aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`, i)
+    );
+    const result = analyzeInputAddress(PHISH, txs);
+    expect(result.detected).toBe(true);
+    expect(result.reason).toBe("dust_attack");
+  });
+
+  test("less than 5 unique targets → not flagged as dust", () => {
+    const txs = Array.from({ length: 4 }, (_, i) =>
+      mkTokenDust(`0x${i}aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`, i)
+    );
+    const result = analyzeInputAddress(PHISH, txs);
+    expect(result.reason).not.toBe("dust_attack");
+  });
+});
+
+describe("Scorer — multi-signal confidence boost", () => {
+  test("two signals → confidence > top weight", () => {
+    const result = buildResult({
+      chain: "ethereum",
+      userAddress: VICTIM,
+      inputAddress: FAKE,
+      historyScanned: 20,
+      similarityScore: 0,
+      matchedAddress: null,
+      zeroValueFound: false,
+      batchPoisonFound: false,
+      dustFound: true,           // weight 70
+      transferFromFound: false,
+      inputAddrDetection: {
+        detected: true,
+        reason: "new_suspicious_address",
+        confidence: 55,          // additional weight=55 signal
+      },
+    });
+    expect(result.scam).toBe(true);
+    // base 70 + 1 extra signal * 7 = 77
+    expect(result.confidence).toBe(77);
+  });
+});
+
+describe("Scorer — lowered similarity threshold", () => {
+  test("similarity match at 75 (below default 85) still counts as signal", () => {
+    const result = buildResult({
+      chain: "ethereum",
+      userAddress: VICTIM,
+      inputAddress: FAKE,
+      historyScanned: 20,
+      similarityScore: 75,
+      matchedAddress: LEGIT,
+      zeroValueFound: false,
+      batchPoisonFound: false,
+      dustFound: false,
+      transferFromFound: false,
+      inputAddrDetection: { detected: false, reason: null, confidence: 0 },
+    });
+    expect(result.reason).toBe("address_poisoning");
+    expect(result.similarityScore).toBe(75);
+  });
+});
+
 describe("Scorer", () => {
   test("critical for batch poisoning", () => {
     const result = buildResult({
